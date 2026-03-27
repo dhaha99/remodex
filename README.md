@@ -1,6 +1,6 @@
 # Remodex
 
-Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler tick을 조합해 `프로젝트별 메인 thread`를 안전하게 이어서 운영하는 실험/운영용 제어면이다.
+Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler tick을 조합해 `프로젝트별 메인 thread`를 안전하게 이어서 운영하는 제어면이다.
 
 핵심 목표:
 
@@ -33,7 +33,7 @@ Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler 
 - 평시 운영: [NORMAL_OPS_MANUAL.md](./NORMAL_OPS_MANUAL.md)
 - 장애/복구: [INCIDENT_RECOVERY_RUNBOOK.md](./INCIDENT_RECOVERY_RUNBOOK.md)
 - 실운영 bootstrap: [PRODUCTION_BOOTSTRAP.md](./PRODUCTION_BOOTSTRAP.md)
-- 검증 로그: [verification/VERIFICATION_LOG.md](./verification/VERIFICATION_LOG.md)
+- 검증 로그 요약: [verification/VERIFICATION_LOG.md](./verification/VERIFICATION_LOG.md)
 
 ## What Is Implemented
 
@@ -47,6 +47,7 @@ Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler 
 - long-run scheduler churn 검증
 - long-run operator ingress churn 검증
 - launchd bootstrap assets
+- 운영 저장소와 로컬 생성물을 분리하는 ignore 정책
 
 ## Repository Layout
 
@@ -69,23 +70,18 @@ Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler 
 ├── scripts/
 │   ├── remodex_bridge_daemon.mjs
 │   ├── remodex_scheduler_tick.mjs
-│   ├── lib/
-│   └── probe_*.mjs
+│   └── lib/
+├── verification/
+│   └── VERIFICATION_LOG.md
 ├── runtime/
-└── verification/
+└── .gitignore
 ```
 
 ## Quick Start
 
-### 1. Local validation
+### 1. Validation baseline
 
-app-server가 이미 `ws://127.0.0.1:4517`에서 떠 있다는 전제라면, probe로 핵심 경로를 다시 확인할 수 있다.
-
-```bash
-node scripts/probe_discord_operator_ingress_churn.mjs
-```
-
-핵심 검증 결과는 [verification/VERIFICATION_LOG.md](./verification/VERIFICATION_LOG.md)에 누적돼 있다.
+핵심 검증 근거와 운영 제약은 [verification/VERIFICATION_LOG.md](./verification/VERIFICATION_LOG.md)에 정리돼 있다. 원시 probe 산출물과 생성된 launchd plist, runtime 로그는 저장소 기본 배치에서 제외하고 로컬 생성물로 취급한다.
 
 ### 2. Production bootstrap
 
@@ -103,6 +99,20 @@ node ops/render_launchd_plists.mjs
 - `ops/launchd/generated/com.remodex.scheduler-tick.plist`
 
 자세한 순서는 [PRODUCTION_BOOTSTRAP.md](./PRODUCTION_BOOTSTRAP.md)를 따른다.
+
+## What Gets Committed
+
+- 운영 문서: 전략, 계약, 실행 계획, runbook, bootstrap
+- 실제 런타임: bridge daemon, scheduler tick, 공용 runtime library
+- 부트스트랩 자산: env example, wrapper, plist renderer, install/uninstall 스크립트
+- 검증 요약: `verification/VERIFICATION_LOG.md`
+
+아래는 기본적으로 로컬 생성물로 취급한다.
+
+- `ops/remodex.env`
+- `ops/launchd/generated/*.plist`
+- `runtime/*`
+- `verification/` 원시 산출물 대부분
 
 ## Operating Rules
 

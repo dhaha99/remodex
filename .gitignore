@@ -1,0 +1,9 @@
+ops/remodex.env
+ops/launchd/generated/*.plist
+runtime/
+
+verification/**
+!verification/
+!verification/VERIFICATION_LOG.md
+
+.DS_Store
