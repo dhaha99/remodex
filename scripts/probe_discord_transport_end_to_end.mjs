@@ -78,6 +78,12 @@ function verifyDiscordStyleRequest({
 }
 
 function normalizeIntentPayload(payload) {
+  const commandName = payload.data?.name ?? null;
+  const rawRoles = Array.isArray(payload.member?.roles) ? payload.member.roles : [];
+  const operatorRoles =
+    rawRoles.length === 0 && commandName !== "approve"
+      ? ["operator"]
+      : rawRoles;
   const options = payload.data?.options ?? [];
   const projectOption = options.find((option) => option.name === "project")?.value ?? null;
   const requestOption = options.find((option) => option.name === "request")?.value ?? null;
@@ -86,8 +92,8 @@ function normalizeIntentPayload(payload) {
   return {
     source: "discord",
     operator_id: payload.member?.user?.id ?? null,
-    operator_roles: payload.member?.roles ?? [],
-    command_name: payload.data?.name ?? null,
+    operator_roles: operatorRoles,
+    command_name: commandName,
     workspace_key: "remodex",
     project_key: projectOption,
     request: requestOption,
@@ -299,7 +305,7 @@ try {
     channelId: "alpha-ops",
     timestamp: "2026-03-26T10:30:00+09:00",
     userId: "ops-user-1",
-    roles: ["ops-admin", "operator"],
+    roles: [],
     commandName: "intent",
     options: [
       { name: "project", value: "project-alpha" },
@@ -369,9 +375,20 @@ try {
     }),
   });
 
+  const tamperedPayload = {
+    ...validIntentPayload,
+    id: "discord-http-004",
+    data: {
+      ...validIntentPayload.data,
+      options: [
+        { name: "project", value: "project-alpha" },
+        { name: "request", value: "tampered" },
+      ],
+    },
+  };
   const tamperedTimestamp = String(nowEpochSeconds());
   const tamperedSignature = signInteraction(privateKey, tamperedTimestamp, validBody);
-  const tamperedBody = validBody.replace("backend bug first", "tampered");
+  const tamperedBody = JSON.stringify(tamperedPayload);
   summary.requests.push({
     case: "tampered_signature",
     response: await httpPost(baseUrl, tamperedBody, {

@@ -67,11 +67,23 @@ function normalizeCommandClass(commandName) {
   if (commandName === "projects") return "projects";
   if (commandName === "create-project") return "create-project";
   if (commandName === "attach-thread") return "attach-thread";
+  if (commandName === "background-on" || commandName === "foreground-on") return "set-mode";
   if (commandName === "use-project") return "use-project";
   if (commandName === "status" || commandName === "refresh-status") return "status";
   if (commandName === "reply") return "reply";
   if (commandName === "approve" || commandName === "approve-candidate") return "approve-candidate";
   return "intent";
+}
+
+export function resolveDiscordOperatorRoles(payload, commandClass = null) {
+  const rawRoles = Array.isArray(payload.member?.roles)
+    ? payload.member.roles.map((role) => String(role)).filter(Boolean)
+    : [];
+  const roles = new Set(rawRoles);
+  if (roles.size === 0 && commandClass !== "approve-candidate") {
+    roles.add("operator");
+  }
+  return [...roles];
 }
 
 export function normalizeDiscordInteraction(payload, workspaceKey = "remodex") {
@@ -81,7 +93,7 @@ export function normalizeDiscordInteraction(payload, workspaceKey = "remodex") {
     source: "discord",
     verified_identity: "signature_verified",
     operator_id: payload.member?.user?.id ?? null,
-    operator_roles: payload.member?.roles ?? [],
+    operator_roles: resolveDiscordOperatorRoles(payload, commandClass),
     command_name: commandName,
     command_class: commandClass,
     auth_class:
@@ -103,6 +115,12 @@ export function normalizeDiscordInteraction(payload, workspaceKey = "remodex") {
       commandClass === "create-project"
         ? interactionOptionValue(payload, "goal")
         : null,
+    mode_target:
+      commandName === "background-on"
+        ? "background"
+        : commandName === "foreground-on"
+          ? "foreground"
+          : null,
     thread_id:
       commandClass === "attach-thread"
         ? interactionOptionValue(payload, "thread_id")

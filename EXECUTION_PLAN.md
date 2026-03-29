@@ -37,7 +37,7 @@
 
 - Strategy baseline: `Shared Working Memory Strategy v3`
 - Execution plan version: `2026-03-29`
-- Current phase: `Phase 14 - Discord Existing Thread Attach UX complete`
+- Current phase: `Phase 15 - Discord Mode Toggle UX complete`
 - Current active package: `none`
 - Current active WBS: `none`
 - Immediate next smallest batch:
@@ -62,6 +62,7 @@
 | P12 | Discord operator UX 개선 | `completed` |
 | P13 | Discord component UX 개선 | `completed` |
 | P14 | Discord existing-thread attach UX 개선 | `completed` |
+| P15 | Discord foreground/background mode toggle UX 개선 | `completed` |
 
 ## Work Packages
 
@@ -681,3 +682,34 @@
   - operator가 숨은 heuristic 하나에 묶이지 않고 추천 보기, 전체 보기, 직접 연결 중 하나를 고를 수 있다
   - 사용자가 attach 후보를 고르면 새 프로젝트 생성 없이 기존 thread를 project-local namespace에 연결할 수 있다
   - attach 완료 후 ordinary `/status`, `/intent`, `/reply` 흐름을 같은 project key로 계속 쓸 수 있다
+
+### EP-990 Discord Mode Toggle UX
+
+- Status: `completed`
+- WBS refs: `15.1`, `15.2`
+- Strategy refs:
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Autonomous Night Shift Gate](./STRATEGY.md#autonomous-night-shift-gate)
+  - [Background Cron Toggle Rule](./MAIN_COORDINATOR_PROMPT_CONTRACT.md#background-cron-toggle-rule)
+- Validation basis:
+  - [Probe 92](./verification/VERIFICATION_LOG.md#2026-03-29---probe-92-discord-mode-toggle-ux)
+  - [Probe 87](./verification/VERIFICATION_LOG.md#2026-03-29---probe-87-discord-component-ux)
+  - [Probe 89](./verification/VERIFICATION_LOG.md#2026-03-29---probe-89-live-discord-command-refresh-after-attach-control-expansion)
+- Progress evidence:
+  - [scripts/lib/discord_command_manifest.mjs](./scripts/lib/discord_command_manifest.mjs)
+  - [scripts/lib/discord_transport.mjs](./scripts/lib/discord_transport.mjs)
+  - [scripts/lib/discord_gateway_adapter_runtime.mjs](./scripts/lib/discord_gateway_adapter_runtime.mjs)
+  - [scripts/lib/discord_gateway_operator_responder.mjs](./scripts/lib/discord_gateway_operator_responder.mjs)
+  - [scripts/probe_discord_mode_toggle_ux.mjs](./scripts/probe_discord_mode_toggle_ux.mjs)
+  - [verification/discord_mode_toggle_ux_probe_summary.json](./verification/discord_mode_toggle_ux_probe_summary.json)
+- Deliverables:
+  - `/background-on`, `/foreground-on` Discord slash command
+  - project 카드의 `백그라운드 시작`, `앱 복귀` 버튼
+  - `background_trigger_toggle.json` writer를 Discord operator action과 연결
+  - mode 전환 응답의 `scheduler`, `blocked_reasons`, `mode` 설명
+  - foreground/background 전환 후 project 카드 재렌더링
+- Exit criteria:
+  - operator가 터미널 없이 Discord만으로 foreground/background 모드를 바꿀 수 있다
+  - background 전환 응답은 scheduler arm 여부와 차단 이유를 같이 보여준다
+  - foreground 전환 응답은 scheduler 차단이 정상임을 명확히 보여준다
+  - approval 대기나 `must_human_check`가 있을 때 background 전환이 그것을 우회하지 않는다

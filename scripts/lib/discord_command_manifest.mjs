@@ -33,6 +33,18 @@ export function buildDiscordCommandManifest() {
       options: [stringOption("thread_id", "연결할 Codex thread id", { autocomplete: true })],
     },
     {
+      name: "background-on",
+      description: "현재 프로젝트를 background scheduler 대상로 전환합니다.",
+      type: 1,
+      options: [stringOption("project", "대상 프로젝트 키", { required: false, autocomplete: true })],
+    },
+    {
+      name: "foreground-on",
+      description: "현재 프로젝트를 foreground 작업 모드로 전환합니다.",
+      type: 1,
+      options: [stringOption("project", "대상 프로젝트 키", { required: false, autocomplete: true })],
+    },
+    {
       name: "status",
       description: "프로젝트 현재 상태를 조회합니다.",
       type: 1,

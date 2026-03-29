@@ -217,9 +217,26 @@ try {
   const callbackPosts = collector.requests.filter((request) => request.method === "POST");
   const callbackPatches = collector.requests.filter((request) => request.method === "PATCH");
   const projectsPatch = callbackPatches[0]?.body ?? null;
-  const selectUpdate = callbackPosts.find((request) => request.body?.type === 7 && request.body?.data?.components?.length >= 2)?.body ?? null;
-  const statusUpdate = callbackPosts.find((request) => request.body?.type === 7 && String(request.body?.data?.content ?? "").includes("status: idle"))?.body ?? null;
-  const bindUpdate = callbackPosts.find((request) => request.body?.type === 7 && String(request.body?.data?.content ?? "").includes("route: channel_binding"))?.body ?? null;
+  const selectDeferred = callbackPosts.find((request) => request.body?.type === 6)?.body ?? null;
+  const selectUpdate =
+    callbackPatches.find((request) => {
+      const content = String(request.body?.content ?? "");
+      return (
+        content.includes("project: project-alpha") &&
+        content.includes("display: Alpha") &&
+        content.includes("goal: 로그인 안정화") &&
+        Array.isArray(request.body?.components)
+      );
+    })?.body ?? null;
+  const statusDeferred = callbackPosts.filter((request) => request.body?.type === 6)[1]?.body ?? null;
+  const statusUpdate =
+    callbackPatches.find((request) => {
+      const content = String(request.body?.content ?? "");
+      return content.includes("project: project-alpha") && content.includes("status:") && content.includes("queue:");
+    })?.body ?? null;
+  const bindDeferred = callbackPosts.filter((request) => request.body?.type === 6)[2]?.body ?? null;
+  const bindUpdate =
+    callbackPatches.find((request) => String(request.body?.content ?? "").includes("route: channel_binding"))?.body ?? null;
   const intentModal = callbackPosts.find((request) => request.body?.type === 9)?.body ?? null;
   const modalAck = callbackPosts.find((request) => request.body?.type === 5 && request.url?.includes("/callback") && request.body?.data?.flags === 64)?.body ?? null;
   const modalPatch = callbackPatches.find((request) => String(request.body?.content ?? "").includes("route: inbox"))?.body ?? null;
@@ -237,8 +254,11 @@ try {
     : null;
 
   summary.projects_patch = projectsPatch;
+  summary.select_deferred = selectDeferred;
   summary.select_update = selectUpdate;
+  summary.status_deferred = statusDeferred;
   summary.status_update = statusUpdate;
+  summary.bind_deferred = bindDeferred;
   summary.bind_update = bindUpdate;
   summary.intent_modal = intentModal;
   summary.modal_ack = modalAck;
@@ -253,8 +273,17 @@ try {
   const projectsHasSelect =
     projectsPatch?.components?.[0]?.components?.[0]?.custom_id === "projects:select";
   const selectHasButtons =
-    selectUpdate?.data?.components?.[1]?.components?.some((component) => component.custom_id === "projects:intent:project-alpha");
-  const statusShowsSummary = String(statusUpdate?.data?.content ?? "").includes("project: project-alpha");
+    selectUpdate?.components?.[1]?.components?.some((component) => component.custom_id === "projects:intent:project-alpha");
+  const selectHasModeButtons =
+    selectUpdate?.components?.[2]?.components?.some((component) => component.custom_id === "projects:background:project-alpha") &&
+    selectUpdate?.components?.[2]?.components?.some((component) => component.custom_id === "projects:foreground:project-alpha");
+  const statusShowsSummary =
+    String(statusUpdate?.content ?? "").includes("project: project-alpha") &&
+    String(statusUpdate?.content ?? "").includes("status:") &&
+    String(statusUpdate?.content ?? "").includes("queue:");
+  const statusHasModeButtons =
+    statusUpdate?.components?.[2]?.components?.some((component) => component.custom_id === "projects:background:project-alpha") &&
+    statusUpdate?.components?.[2]?.components?.some((component) => component.custom_id === "projects:foreground:project-alpha");
   const bindingWorked = summary.channel_binding?.project_key === "project-alpha";
   const modalOpened =
     intentModal?.data?.custom_id === "projects:intent_modal:project-alpha" &&
@@ -263,11 +292,19 @@ try {
     modalAck?.type === 5 &&
     summary.inbox_record?.request === "버튼에서 연 작업 지시" &&
     summary.dispatch_record?.project_key === "project-alpha";
+  const deferredInteractionsWorked =
+    selectDeferred?.type === 6 &&
+    statusDeferred?.type === 6 &&
+    bindDeferred?.type === 6 &&
+    String(bindUpdate?.content ?? "").includes("route: channel_binding");
 
   summary.status =
     projectsHasSelect &&
+    deferredInteractionsWorked &&
     selectHasButtons &&
+    selectHasModeButtons &&
     statusShowsSummary &&
+    statusHasModeButtons &&
     bindingWorked &&
     modalOpened &&
     modalDelivered

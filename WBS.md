@@ -200,6 +200,17 @@
 | 14.2.3 | `completed` | `EP-980` | `/attach-thread` direct attach command | [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule) |
 | 14.2.4 | `completed` | `EP-980` | `attach-thread.thread_id` autocomplete + short-id prefix resolution | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
 
+### 15.0 Discord Mode Toggle UX
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 15.1 | `completed` | `EP-990` | Discord mode toggle command surface | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 15.1.1 | `completed` | `EP-990` | `/background-on`, `/foreground-on` slash command | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 15.1.2 | `completed` | `EP-990` | mode toggle command normalization | [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule) |
+| 15.2 | `completed` | `EP-990` | project 카드 foreground/background control | [Autonomous Night Shift Gate](./STRATEGY.md#autonomous-night-shift-gate) |
+| 15.2.1 | `completed` | `EP-990` | `백그라운드 시작`, `앱 복귀` 버튼 | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 15.2.2 | `completed` | `EP-990` | mode 전환 후 scheduler 상태 설명 | [Background Cron Toggle Rule](./MAIN_COORDINATOR_PROMPT_CONTRACT.md#background-cron-toggle-rule) |
+
 ## Rollup Rules
 
 - parent WBS는 child 중 하나라도 `in_progress`면 `in_progress`다.
@@ -216,6 +227,7 @@
 - `12.0`은 `/projects`, 자동완성, `/use-project`, implicit project resolution까지 포함해 operator UX를 정리했다.
 - `13.0`은 `/projects` 선택 카드, 상태/고정/작업 지시 버튼, modal submit까지 포함해 component UX를 정리했다.
 - `14.0`은 shared memory가 비어 있어도 existing Codex thread를 발견해 attach하는 첫 진입 경로를 정리했고, 추천 보기만 강제하지 않고 전체 보기/직접 연결까지 제공한다.
+- `15.0`은 foreground/background 전환을 터미널 파일 수정이 아니라 Discord 버튼과 slash command에서 직접 수행하도록 정리했다.
   - canonical ingress는 이제 문서, 코드, bootstrap, local probe, live external edge 증거를 모두 갖췄다.
 - Next smallest batch:
   - `실제 launchd 등록 또는 Windows 실제 실행 증거 수집이 필요할 때 새 배치를 연다`

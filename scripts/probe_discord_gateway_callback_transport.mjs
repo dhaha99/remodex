@@ -26,6 +26,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitFor(check, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const result = await check();
+    if (result) return result;
+    await sleep(intervalMs);
+  }
+  return null;
+}
+
 class FakeGatewaySocket {
   constructor(url) {
     this.url = url;
@@ -208,20 +218,41 @@ try {
       request: "prioritize integration tests",
     }),
   });
-  await sleep(30);
+  await waitFor(() => fakeApi.requests.length >= 4);
 
   summary.ackRequests = fakeApi.requests.filter((request) => request.url?.includes("/callback"));
   summary.editRequests = fakeApi.requests.filter((request) => request.url?.includes("/messages/@original"));
-  summary.intentInboxRecord = await readJsonIfExists(path.join(paths.inboxDir, (await fs.readdir(paths.inboxDir))[0]));
-  summary.outboxRecord = await readJsonIfExists(path.join(paths.outboxDir, (await fs.readdir(paths.outboxDir))[0]));
+  const inboxRecord = await waitFor(async () => {
+    const inboxFiles = await fs.readdir(paths.inboxDir);
+    if (!inboxFiles.length) return null;
+    return await readJsonIfExists(path.join(paths.inboxDir, inboxFiles[0]));
+  });
+  const outboxRecord = await waitFor(async () => {
+    const outboxFiles = await fs.readdir(paths.outboxDir);
+    if (!outboxFiles.length) return null;
+    return await readJsonIfExists(path.join(paths.outboxDir, outboxFiles[0]));
+  });
+  summary.intentInboxRecord = inboxRecord;
+  summary.outboxRecord = outboxRecord;
+  const editContents = summary.editRequests
+    .map((request) => request.body?.content)
+    .filter((content) => typeof content === "string");
+  const hasStatusPatch = editContents.some((content) =>
+    content.includes("project: project-alpha") &&
+    content.includes("status: ") &&
+    content.includes("queue: 0"),
+  );
+  const hasIntentPatch = editContents.some((content) =>
+    content.includes("route: inbox") &&
+    content.includes("project: project-alpha"),
+  );
   summary.finishedAt = new Date().toISOString();
   summary.status =
     summary.ackRequests.length === 2 &&
     summary.ackRequests.every((request) => request.body?.type === 5 && request.body?.data?.flags === 64) &&
     summary.editRequests.length === 2 &&
-    summary.editRequests[0]?.body?.content?.includes("project: project-alpha") &&
-    summary.editRequests[0]?.body?.content?.includes("status: idle") &&
-    summary.editRequests[1]?.body?.content?.includes("route: inbox") &&
+    hasStatusPatch &&
+    hasIntentPatch &&
     summary.intentInboxRecord?.request === "prioritize integration tests" &&
     summary.outboxRecord?.type === "status_response"
       ? "PASS"

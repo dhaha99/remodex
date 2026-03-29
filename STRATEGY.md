@@ -1571,6 +1571,7 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 - command payload에 명시적 `project` 인자를 두거나, channel/thread map으로 project를 결정
 - operator UX는 최소한 `/projects`, `project` 자동완성, `/use-project` 채널 기본 프로젝트 바인딩을 제공하는 편이 맞다
 - operator UX는 slash command만 두지 말고, 가능하면 message components 기반 `project select -> status/bind/intent buttons -> modal` 흐름을 제공하는 편이 좋다
+- operator UX는 foreground/background 전환도 Discord에서 직접 할 수 있어야 하고, 최소한 `백그라운드 시작`, `앱 복귀`, `/background-on`, `/foreground-on`을 제공하는 편이 맞다
 - `/projects`는 shared memory 등록 프로젝트만 보여주면 안 되고, existing Codex thread 중 아직 binding되지 않은 attach 후보도 같이 보여줘야 한다
 - `추천 보기`는 현재 저장소 중심으로 좁혀도 되지만, `전체 보기`는 다른 저장소의 식별 가능한 existing Codex thread까지 포함하는 편이 맞다
 - attach 후보는 숨은 단일 heuristic만 강제하지 말고, 최소한 `추천 보기`, `다른 저장소 포함 전체 보기`, `thread id 직접 연결` 세 경로를 operator가 선택할 수 있게 하는 편이 맞다
@@ -1584,6 +1585,8 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 - 즉 `interaction accepted`와 `same-thread delivery completed`는 다른 상태로 취급해야 한다
 - status summary, human gate notification, blocker notification은 transport 이전에 `router/outbox/*` truth를 먼저 남기는 구조를 권장한다
 - human gate notification은 approval loop 중 `waitingOnApproval`가 다시 들어오더라도 lane이 완전히 끝나기 전까지는 한 번만 발행하는 dedupe를 권장한다
+- background 전환 응답은 `scheduler`가 실제로 arm됐는지, 어떤 blocked reason 때문에 아직 진행이 안 되는지까지 함께 설명하는 편이 맞다
+- foreground 전환 응답은 scheduler가 차단되는 것이 정상임을 operator에게 명확히 보여주는 편이 맞다
 
 비권장 구현:
 

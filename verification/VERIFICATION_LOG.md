@@ -4147,3 +4147,68 @@
 ### Strategy Impact
 - attach 이후 `/status`는 내부 project key나 bootstrap placeholder를 던지는 half-state가 아니라, attached existing thread를 기준으로 상태를 다시 설명해야 한다.
 - cross-workspace attach UX는 attach 자체뿐 아니라 상태 조회 surface까지 사용자 기준으로 읽히게 맞춰야 한다.
+
+## 2026-03-29 - Probe 92: Discord mode toggle UX
+
+### Goal
+- Discord project 카드와 slash command에서 foreground/background 전환을 직접 수행할 수 있는지 검증한다.
+- background 전환이 scheduler arm 상태를, foreground 전환이 scheduler 차단 상태를 operator에게 명확히 돌려주는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_mode_toggle_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_mode_toggle_ux.mjs)
+- Summary output: [verification/discord_mode_toggle_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_mode_toggle_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- `/status` 응답 카드에 `백그라운드 시작`, `앱 복귀` 버튼이 함께 노출됐다.
+- `projects:background:project-alpha` 버튼으로 background 전환 시 `background_trigger_toggle.json`이 background truth로 갱신됐고, operator 응답은 `scheduler: armed`를 포함했다.
+- `/foreground-on` slash command로 foreground 복귀 시 같은 toggle이 foreground truth로 복구됐고, operator 응답은 `scheduler: blocked_expected`를 포함했다.
+
+### Evidence
+- `status_operator_message` contains `mode: foreground`
+- `project_card.body.components[2].components[0].custom_id = projects:background:project-alpha`
+- `project_card.body.components[2].components[1].custom_id = projects:foreground:project-alpha`
+- `background_toggle.mode = background`
+- `background_operator_message` contains `scheduler: armed`
+- `foreground_toggle.mode = foreground`
+- `foreground_operator_message` contains `scheduler: blocked_expected`
+
+### Strategy Impact
+- foreground/background mode 전환은 더 이상 터미널 파일 수정을 전제로 하지 않고, Discord operator surface에서 직접 수행할 수 있어야 한다.
+- background 전환 응답은 단순 토글 성공 메시지가 아니라 scheduler arm 여부와 차단 이유까지 함께 설명해야 한다.
+
+## 2026-03-29 - Probe 93: Bound Discord intent with empty roles
+
+### Goal
+- Discord slash command payload에 `member.roles = []`가 들어오더라도, 이미 채널 바인딩된 프로젝트의 `/intent`와 `/status`가 quarantine로 빠지지 않고 정상 경로를 타는지 검증한다.
+- quarantine나 사용자 응답에 `_unresolved`가 남지 않고 실제 resolved project key가 유지되는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_project_selection_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_project_selection_ux.mjs)
+- Summary output: [verification/discord_project_selection_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_project_selection_ux_probe_summary.json)
+- 추가 런타임 재현:
+  - `guild_id = 700849185053737042`
+  - `channel_id = 1487721889064423445`
+  - `member.roles = []`
+  - `command = /intent`
+
+### Result
+- Status: PASS
+- probe에서 `channel_binding` 상태의 `/status`, `/intent` 모두 `roles = []` 조건으로 정상 통과했다.
+- 실제 런타임 경로 재현에서도 `project-codex-ipc`로 project가 해석됐고, `/intent`는 quarantine가 아니라 inbox로 적재됐다.
+- operator roles는 빈 배열을 그대로 믿지 않고 non-approval 명령에 한해 `operator` fallback이 적용됐다.
+
+### Evidence
+- `bound_status.project_resolution.resolved_via = channel_binding`
+- `bound_intent.route = inbox`
+- `bound_intent.inbox_record.operator_roles = ["operator"]`
+- 런타임 재현 결과:
+  - `route = inbox`
+  - `project_key = project-codex-ipc`
+  - `response_project_key = project-codex-ipc`
+  - `latest_inbox_project_key = project-codex-ipc`
+
+### Strategy Impact
+- Discord ingress는 `member.roles` 누락/빈 배열을 그대로 ACL 차단 사유로 쓰면 안 된다.
+- non-approval 명령은 verified operator identity를 기준으로 `operator` fallback을 적용하고, approval 계열만 별도 admin ACL을 유지해야 한다.
+- quarantine 응답은 `normalized.project_key`가 비어 있어도 실제 resolved project key를 우선 노출해야 한다.

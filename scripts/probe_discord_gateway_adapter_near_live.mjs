@@ -28,7 +28,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createInteractionPayload({ id, token, commandName, projectKey, request = null }) {
+function createInteractionPayload({ id, token, commandName, projectKey, request = null, roles = [] }) {
   const options = [{ name: "project", value: projectKey }];
   if (request) {
     options.push({ name: "request", value: request });
@@ -43,7 +43,7 @@ function createInteractionPayload({ id, token, commandName, projectKey, request 
     timestamp: new Date().toISOString(),
     member: {
       user: { id: "operator-1" },
-      roles: ["operator"],
+      roles,
     },
     data: {
       name: commandName,

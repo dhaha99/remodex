@@ -21,6 +21,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitFor(check, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const result = await check();
+    if (result) return result;
+    await sleep(intervalMs);
+  }
+  return null;
+}
+
 class FakeGatewaySocket {
   constructor(url) {
     this.url = url;
@@ -64,7 +74,7 @@ function commandInteraction({
   commandName,
   project = projectKey,
   request = null,
-  roles = ["operator"],
+  roles = [],
 }) {
   const options = [{ name: "project", value: project }];
   if (request) {
@@ -198,12 +208,11 @@ try {
       commandName: "status",
     }),
   });
-  await sleep(10);
-
-  const outboxFiles = await fs.readdir(paths.outboxDir);
-  const outboxRecord = outboxFiles.length
-    ? await readJsonIfExists(path.join(paths.outboxDir, outboxFiles[0]))
-    : null;
+  const outboxRecord = await waitFor(async () => {
+    const outboxFiles = await fs.readdir(paths.outboxDir);
+    if (!outboxFiles.length) return null;
+    return await readJsonIfExists(path.join(paths.outboxDir, outboxFiles[0]));
+  });
   summary.statusOutboxSummary = outboxRecord?.summary ?? null;
   if (!outboxRecord?.summary) {
     throw new Error("status interaction did not publish outbox summary");
@@ -246,15 +255,17 @@ try {
       request: "prioritize integration tests",
     }),
   });
-  await sleep(10);
-
-  const inboxFiles = await fs.readdir(paths.inboxDir);
-  const dispatchFiles = await fs.readdir(paths.dispatchQueueDir);
-  const inboxRecord = inboxFiles.length
-    ? await readJsonIfExists(path.join(paths.inboxDir, inboxFiles[0]))
-    : null;
+  const inboxRecord = await waitFor(async () => {
+    const inboxFiles = await fs.readdir(paths.inboxDir);
+    if (!inboxFiles.length) return null;
+    return await readJsonIfExists(path.join(paths.inboxDir, inboxFiles[0]));
+  });
+  const dispatchFiles = await waitFor(async () => {
+    const files = await fs.readdir(paths.dispatchQueueDir);
+    return files.length ? files : null;
+  });
   summary.intentInboxRecord = inboxRecord;
-  summary.dispatchTicketCount = dispatchFiles.length;
+  summary.dispatchTicketCount = dispatchFiles?.length ?? 0;
   summary.sequenceAfterResume = session.snapshot().seq;
   summary.finishedAt = new Date().toISOString();
   summary.stateEvents = stateEvents;

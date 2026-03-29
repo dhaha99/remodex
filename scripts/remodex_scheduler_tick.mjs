@@ -28,6 +28,14 @@ function currentStatus(snapshot) {
   );
 }
 
+function attachedExistingThreadNeedsWake(snapshot, status = currentStatus(snapshot)) {
+  return (
+    snapshot?.project_identity?.source_kind === "codex_thread_attach" &&
+    Boolean(snapshot?.project_identity?.attached_thread_id ?? snapshot?.coordinator_binding?.threadId) &&
+    status === "notLoaded"
+  );
+}
+
 function blockedDecision(projectKey, reasons, snapshot) {
   return {
     project_key: projectKey,
@@ -73,7 +81,7 @@ async function processProject(projectKey) {
     if (toggle.foreground_session_active) {
       reasons.push("foreground_session_active");
     }
-    if (!["idle", "checkpoint_open"].includes(status)) {
+    if (!["idle", "checkpoint_open"].includes(status) && !attachedExistingThreadNeedsWake(snapshot, status)) {
       reasons.push(`status_${status}`);
     }
 
@@ -93,6 +101,13 @@ async function processProject(projectKey) {
         decision: "inbox",
         recorded_at: new Date().toISOString(),
         result: await runtime.deliverNextInbox(),
+      };
+    } else if (attachedExistingThreadNeedsWake(snapshot, status)) {
+      result = {
+        project_key: projectKey,
+        decision: "attached_thread_wake",
+        recorded_at: new Date().toISOString(),
+        result: await runtime.wakeAttachedCoordinator(),
       };
     } else {
       result = {

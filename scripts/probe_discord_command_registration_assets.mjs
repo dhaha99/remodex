@@ -39,6 +39,8 @@ try {
   summary.use_project_present = summary.command_names.includes("use-project");
   summary.projects_present = summary.command_names.includes("projects");
   summary.attach_thread_present = summary.command_names.includes("attach-thread");
+  summary.background_on_present = summary.command_names.includes("background-on");
+  summary.foreground_on_present = summary.command_names.includes("foreground-on");
   summary.attach_thread_required = Boolean(
     manifest.find((command) => command.name === "attach-thread")?.options?.find((option) => option.name === "thread_id")
       ?.required,
@@ -56,18 +58,32 @@ try {
   summary.use_project_autocomplete = Boolean(
     manifest.find((command) => command.name === "use-project")?.options?.find((option) => option.name === "project")?.autocomplete,
   );
+  summary.background_on_project_optional = manifest.find((command) => command.name === "background-on")?.options?.find((option) => option.name === "project")?.required === false;
+  summary.background_on_project_autocomplete = Boolean(
+    manifest.find((command) => command.name === "background-on")?.options?.find((option) => option.name === "project")?.autocomplete,
+  );
+  summary.foreground_on_project_optional = manifest.find((command) => command.name === "foreground-on")?.options?.find((option) => option.name === "project")?.required === false;
+  summary.foreground_on_project_autocomplete = Boolean(
+    manifest.find((command) => command.name === "foreground-on")?.options?.find((option) => option.name === "project")?.autocomplete,
+  );
   summary.finishedAt = new Date().toISOString();
   summary.status =
-    summary.command_names.join(",") === "projects,create-project,attach-thread,status,use-project,intent,reply,approve-candidate" &&
+    summary.command_names.join(",") === "projects,create-project,attach-thread,background-on,foreground-on,status,use-project,intent,reply,approve-candidate" &&
     endpoint === "https://discord.com/api/v10/applications/app-123/guilds/guild-123/commands" &&
     summary.projects_present &&
     summary.attach_thread_present &&
+    summary.background_on_present &&
+    summary.foreground_on_present &&
     summary.attach_thread_required &&
     summary.attach_thread_autocomplete &&
     summary.use_project_present &&
     summary.status_project_optional &&
     summary.status_project_autocomplete &&
     summary.use_project_autocomplete &&
+    summary.background_on_project_optional &&
+    summary.background_on_project_autocomplete &&
+    summary.foreground_on_project_optional &&
+    summary.foreground_on_project_autocomplete &&
     summary.reply_source_ref_required &&
     summary.approval_source_ref_required
       ? "PASS"

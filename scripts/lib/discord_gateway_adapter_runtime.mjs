@@ -17,7 +17,11 @@ import {
   writeAtomicText,
   writeOutboxRecord,
 } from "./shared_memory_runtime.mjs";
-import { focusedInteractionOption, normalizeDiscordInteraction } from "./discord_transport.mjs";
+import {
+  focusedInteractionOption,
+  normalizeDiscordInteraction,
+  resolveDiscordOperatorRoles,
+} from "./discord_transport.mjs";
 
 const COMPONENT_CUSTOM_ID = Object.freeze({
   PROJECT_SELECT: "projects:select",
@@ -29,6 +33,8 @@ const COMPONENT_CUSTOM_ID = Object.freeze({
   PROJECT_STATUS: "projects:status",
   PROJECT_BIND: "projects:bind",
   PROJECT_INTENT: "projects:intent",
+  PROJECT_BACKGROUND: "projects:background",
+  PROJECT_FOREGROUND: "projects:foreground",
   PROJECT_ATTACH_MANUAL_MODAL: "projects:attach_manual_modal",
   PROJECT_CREATE_MODAL: "projects:create_modal",
   PROJECT_INTENT_MODAL: "projects:intent_modal",
@@ -122,7 +128,7 @@ export class DiscordGatewayAdapterRuntime {
       source: "discord",
       verified_identity: "gateway_session",
       operator_id: payload.member?.user?.id ?? null,
-      operator_roles: payload.member?.roles ?? [],
+      operator_roles: resolveDiscordOperatorRoles(payload, null),
       workspace_key: this.workspaceKey,
       raw_interaction_id: payload.id,
       raw_guild_id: payload.guild_id ?? null,
@@ -365,6 +371,40 @@ export class DiscordGatewayAdapterRuntime {
       };
     }
 
+    if (action === "background" || action === "foreground") {
+      const normalized = {
+        ...normalizedBase,
+        command_name: `projects-${action}-button`,
+        command_class: "set-mode",
+        auth_class: "intent",
+        project_key: rawProjectKey,
+        mode_target: action === "background" ? "background" : "foreground",
+      };
+      const outcome = await this.handleNormalizedCommand(normalized);
+      const catalog = await this.listProjectCatalog();
+      const selectedProject =
+        catalog.find((entry) => entry.project_key === (outcome.project_resolution?.project_key ?? rawProjectKey)) ?? null;
+      return {
+        normalized,
+        ...outcome,
+        result: {
+          ...outcome.result,
+          projects: outcome.result.projects ?? catalog,
+          project_key:
+            outcome.result.project_key ??
+            outcome.project_resolution?.project_key ??
+            rawProjectKey,
+          project:
+            outcome.result.project ??
+            selectedProject,
+        },
+        response_plan: {
+          ...(outcome.response_plan ?? {}),
+          initial_response: "component_update",
+        },
+      };
+    }
+
     const commandClass = action === "bind" ? "use-project" : "status";
     const normalized = {
       ...normalizedBase,
@@ -413,7 +453,7 @@ export class DiscordGatewayAdapterRuntime {
         source: "discord",
         verified_identity: "gateway_session",
         operator_id: payload.member?.user?.id ?? null,
-        operator_roles: payload.member?.roles ?? [],
+        operator_roles: resolveDiscordOperatorRoles(payload, "create-project"),
         command_name: "projects-create-modal-submit",
         command_class: "create-project",
         auth_class: "intent",
@@ -450,7 +490,7 @@ export class DiscordGatewayAdapterRuntime {
         source: "discord",
         verified_identity: "gateway_session",
         operator_id: payload.member?.user?.id ?? null,
-        operator_roles: payload.member?.roles ?? [],
+        operator_roles: resolveDiscordOperatorRoles(payload, "attach-thread"),
         command_name: "projects-attach-manual-modal-submit",
         command_class: "attach-thread",
         auth_class: "intent",
@@ -483,7 +523,7 @@ export class DiscordGatewayAdapterRuntime {
           source: "discord",
           verified_identity: "gateway_session",
           operator_id: payload.member?.user?.id ?? null,
-          operator_roles: payload.member?.roles ?? [],
+          operator_roles: resolveDiscordOperatorRoles(payload, "intent"),
           command_name: "modal-unknown",
           command_class: "intent",
           auth_class: "intent",
@@ -516,7 +556,7 @@ export class DiscordGatewayAdapterRuntime {
       source: "discord",
       verified_identity: "gateway_session",
       operator_id: payload.member?.user?.id ?? null,
-      operator_roles: payload.member?.roles ?? [],
+      operator_roles: resolveDiscordOperatorRoles(payload, "intent"),
       command_name: "projects-intent-modal-submit",
       command_class: "intent",
       auth_class: "intent",
@@ -735,6 +775,14 @@ export class DiscordGatewayAdapterRuntime {
       };
     }
 
+    if (effectiveNormalized.command_class === "set-mode") {
+      return await this.updateProjectMode({
+        projectKey: resolution.project_key,
+        modeTarget: effectiveNormalized.mode_target,
+        operatorId: effectiveNormalized.operator_id ?? null,
+      });
+    }
+
     const projectKey = effectiveNormalized.project_key ?? "_unresolved";
     const runtime = await this.runtimeForProject(projectKey);
     const deliveryMode =
@@ -743,8 +791,15 @@ export class DiscordGatewayAdapterRuntime {
         : "async";
     const result = await runtime.handleCommand(effectiveNormalized, { deliveryMode });
     let outbox = null;
+    if (!result.project_key) {
+      result.project_key = projectKey;
+    }
 
     if (effectiveNormalized.command_class === "status" && result.route === "status") {
+      const catalog = await this.listProjectCatalog();
+      result.projects = catalog;
+      result.project = catalog.find((entry) => entry.project_key === projectKey) ?? null;
+      result.project_key = projectKey;
       outbox = await this.publishOutbox(projectKey, "status_response", {
         source_ref: effectiveNormalized.source_ref,
         correlation_key: effectiveNormalized.correlation_key,
@@ -788,6 +843,9 @@ export class DiscordGatewayAdapterRuntime {
         current_goal: summary.current_goal,
         current_focus: summary.current_focus,
         next_smallest_batch: summary.next_smallest_batch,
+        background_trigger_enabled: summary.background_trigger_enabled,
+        foreground_session_active: summary.foreground_session_active,
+        mode: deriveProjectMode(summary),
         choice_name: hint ? `${displayName} — ${hint}` : displayName,
       });
     }
@@ -1233,6 +1291,66 @@ export class DiscordGatewayAdapterRuntime {
     };
   }
 
+  async updateProjectMode({ projectKey, modeTarget, operatorId = null }) {
+    const normalizedMode = normalizeModeTarget(modeTarget);
+    if (!normalizedMode) {
+      return {
+        result: {
+          route: "project_mode_invalid",
+          delivery_decision: "blocked",
+          reason: "invalid_mode_target",
+          projects: await this.listProjectCatalog(),
+        },
+        response_plan: {
+          initial_response: "deferred_ephemeral",
+          followup_source: "project_mode_invalid",
+          project_key: projectKey ?? null,
+        },
+      };
+    }
+
+    const paths = buildProjectPaths({
+      sharedBase: this.sharedBase,
+      workspaceKey: this.workspaceKey,
+      projectKey,
+    });
+    await ensureProjectDirs(paths);
+    const existingToggle = (await readJsonIfExists(path.join(paths.stateDir, "background_trigger_toggle.json"))) ?? {};
+    const nextToggle = {
+      ...existingToggle,
+      ...toggleStateForMode(normalizedMode),
+      updated_at: new Date().toISOString(),
+      updated_by: operatorId,
+    };
+    await writeAtomicJson(path.join(paths.stateDir, "background_trigger_toggle.json"), nextToggle);
+
+    const snapshot = await readProjectSnapshot(paths);
+    const summary = summarizeSnapshot(paths, snapshot);
+    const schedulerGate = evaluateSchedulerGate(summary, snapshot);
+    const catalog = await this.listProjectCatalog();
+    const project = catalog.find((entry) => entry.project_key === projectKey) ?? null;
+
+    return {
+      result: {
+        route: "project_mode_updated",
+        delivery_decision: "not_applicable",
+        project_key: projectKey,
+        mode_target: normalizedMode,
+        toggle: nextToggle,
+        summary,
+        scheduler_gate: schedulerGate,
+        wake_strategy: canWakeAttachedExistingThread(snapshot) ? "resume_attached_thread" : null,
+        project,
+        projects: catalog,
+      },
+      response_plan: {
+        initial_response: "deferred_ephemeral",
+        followup_source: "project_mode_updated",
+        project_key: projectKey,
+      },
+    };
+  }
+
   async resolveAttachThreadId(threadRef) {
     const token = String(threadRef ?? "").trim();
     if (!token) return null;
@@ -1405,6 +1523,83 @@ function truncateChoiceName(value, maxLength = 100) {
   const text = String(value ?? "").trim();
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function normalizeModeTarget(value) {
+  if (value === "background" || value === "foreground") return value;
+  return null;
+}
+
+function toggleStateForMode(mode) {
+  if (mode === "background") {
+    return {
+      background_trigger_enabled: true,
+      foreground_session_active: false,
+      foreground_lock_enabled: false,
+      mode: "background",
+    };
+  }
+  return {
+    background_trigger_enabled: false,
+    foreground_session_active: true,
+    foreground_lock_enabled: true,
+    mode: "foreground",
+  };
+}
+
+function snapshotStatusType(snapshot) {
+  return (
+    snapshot.coordinator_status?.type ??
+    snapshot.coordinator_status?.status?.type ??
+    snapshot.coordinator_status?.status ??
+    "offline_or_no_lease"
+  );
+}
+
+function canWakeAttachedExistingThread(snapshot, currentStatus = snapshotStatusType(snapshot)) {
+  return (
+    snapshot?.project_identity?.source_kind === "codex_thread_attach" &&
+    Boolean(snapshot?.project_identity?.attached_thread_id ?? snapshot?.coordinator_binding?.threadId) &&
+    currentStatus === "notLoaded"
+  );
+}
+
+function evaluateSchedulerGate(summary, snapshot) {
+  const reasons = [];
+  if (!snapshot.coordinator_binding?.threadId && !snapshot.coordinator_lease?.current_thread_ref) {
+    reasons.push("missing_binding");
+  }
+  if (summary.must_human_check) {
+    reasons.push("must_human_check");
+  }
+  if ((summary.human_gate_candidate_count ?? 0) > 0) {
+    reasons.push("pending_human_gate");
+  }
+  if (summary.background_trigger_enabled === false) {
+    reasons.push("background_trigger_disabled");
+  }
+  if (summary.foreground_session_active) {
+    reasons.push("foreground_session_active");
+  }
+  const currentStatus = snapshotStatusType(snapshot);
+  if (!["idle", "checkpoint_open"].includes(currentStatus) && !canWakeAttachedExistingThread(snapshot, currentStatus)) {
+    reasons.push(`status_${currentStatus}`);
+  }
+  return {
+    ready: reasons.length === 0,
+    reasons,
+  };
+}
+
+function deriveProjectMode(project) {
+  if (!project) return "manual";
+  if (project.background_trigger_enabled === true && project.foreground_session_active !== true) {
+    return "background";
+  }
+  if (project.background_trigger_enabled === false && project.foreground_session_active === true) {
+    return "foreground";
+  }
+  return "manual";
 }
 
 function isWorkspaceThread(thread, workspaceCwd) {

@@ -25,6 +25,7 @@ import {
   writeHumanGateCandidate,
   writeInboxEvent,
   writeQuarantineRecord,
+  writeAtomicJson,
 } from "./shared_memory_runtime.mjs";
 
 const DEFAULT_REQUIRED_ROLES = {
@@ -55,6 +56,21 @@ function statusType(snapshot) {
     snapshot.coordinator_status?.status ??
     "offline_or_no_lease"
   );
+}
+
+function isAttachedCodexThread(snapshot) {
+  return (
+    snapshot?.project_identity?.source_kind === "codex_thread_attach" &&
+    Boolean(
+      snapshot?.project_identity?.attached_thread_id ??
+      snapshot?.coordinator_binding?.threadId ??
+      snapshot?.coordinator_lease?.current_thread_ref,
+    )
+  );
+}
+
+function canResumeAttachedThread(snapshot, currentStatus = statusType(snapshot)) {
+  return isAttachedCodexThread(snapshot) && currentStatus === "notLoaded";
 }
 
 function activeApprovalSourceRef(snapshot) {
@@ -616,7 +632,7 @@ export class BridgeRuntime {
       };
     }
 
-    if (!["idle", "checkpoint_open"].includes(currentStatus)) {
+    if (!["idle", "checkpoint_open"].includes(currentStatus) && !canResumeAttachedThread(snapshot, currentStatus)) {
       return {
         decision: "defer",
         reasons: [`status_${currentStatus}`],
@@ -658,6 +674,14 @@ export class BridgeRuntime {
     }
 
     const client = await this.connectClientIfNeeded();
+    if (canResumeAttachedThread(snapshot)) {
+      await client.request("thread/resume", {
+        threadId,
+        cwd: snapshot.project_identity?.cwd ?? this.paths.workspaceRoot,
+        approvalPolicy: "never",
+        sandbox: "workspace-write",
+      });
+    }
     const result = await runTurnAndRead(client, threadId, message, 240_000, {
       onTurnStarted: async ({ turnId, turnStartAttempts }) => {
         await writeInFlightDelivery(this.paths, {
@@ -755,6 +779,46 @@ export class BridgeRuntime {
     }
     return await this.arbitratePersistedEvent(path.join(this.paths.inboxDir, inboxFiles[0]));
   }
+
+  async wakeAttachedCoordinator() {
+    const snapshot = await this.snapshot();
+    const currentStatus = statusType(snapshot);
+    if (!canResumeAttachedThread(snapshot, currentStatus)) {
+      return {
+        delivery_decision: "noop",
+        reasons: [`status_${currentStatus}`],
+      };
+    }
+
+    const threadId = normalizeThreadId(snapshot);
+    if (!threadId) {
+      return {
+        delivery_decision: "noop",
+        reasons: ["missing_binding"],
+      };
+    }
+
+    const client = await this.connectClientIfNeeded();
+    const resumeResult = await client.request("thread/resume", {
+      threadId,
+      cwd: snapshot.project_identity?.cwd ?? this.paths.workspaceRoot,
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+    });
+    const resumedStatus =
+      resumeResult?.thread?.status?.type ??
+      resumeResult?.thread?.status ??
+      "idle";
+    await writeCoordinatorStatusIfChanged(this.paths, {
+      type: resumedStatus,
+      observed_at: new Date().toISOString(),
+    });
+    return {
+      delivery_decision: "attached_thread_resumed",
+      thread_id: threadId,
+      resumed_status: resumedStatus,
+    };
+  }
 }
 
 function filePathOrigin(filePath, paths) {
@@ -790,4 +854,14 @@ function summarizeThreadPreviewHint(preview) {
 function isBootstrapNextBatch(value) {
   const text = String(value ?? "").trim().toLowerCase();
   return text === "main coordinator state refresh";
+}
+
+async function writeCoordinatorStatusIfChanged(paths, nextStatus) {
+  const current = await readRecord(path.join(paths.stateDir, "coordinator_status.json")).catch(() => null);
+  const same =
+    current &&
+    current.type === nextStatus.type &&
+    current.observed_at === nextStatus.observed_at;
+  if (same) return;
+  await writeAtomicJson(path.join(paths.stateDir, "coordinator_status.json"), nextStatus);
 }

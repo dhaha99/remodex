@@ -10,6 +10,7 @@ function summarizeStatus(summary) {
   if (summary.attached_workspace_label) {
     lines.push(`workspace: ${summary.attached_workspace_label}`);
   }
+  lines.push(`mode: ${renderProjectModeLabel(summary)}`);
   lines.push(`status: ${renderStatusLabel(summary.attached_thread_status ?? summary.coordinator_status)}`);
   if (summary.attached_thread_hint) {
     lines.push(`hint: ${summary.attached_thread_hint}`);
@@ -18,6 +19,16 @@ function summarizeStatus(summary) {
   lines.push(`human_gate: ${summary.human_gate_candidate_count ?? 0}`);
   lines.push(`queue: ${summary.dispatch_queue_count ?? 0}`);
   return lines.join("\n");
+}
+
+function renderProjectModeLabel(summary) {
+  if (summary.background_trigger_enabled === true && summary.foreground_session_active !== true) {
+    return "background";
+  }
+  if (summary.background_trigger_enabled === false && summary.foreground_session_active === true) {
+    return "foreground";
+  }
+  return "manual";
 }
 
 function renderStatusLabel(status) {
@@ -92,6 +103,8 @@ function renderProjectPickerComponents(
   attachableThreads = [],
   attachScope = "recommended",
 ) {
+  const selectedProject = (projects ?? []).find((project) => project.project_key === selectedProjectKey) ?? null;
+  const selectedMode = selectedProject?.mode ?? "manual";
   const options = (projects ?? []).slice(0, 25).map((project) => ({
     label: truncateText(project.display_name ?? project.project_key, 100),
     description: truncateText(projectHint(project), 100),
@@ -159,6 +172,26 @@ function renderProjectPickerComponents(
           style: 1,
           custom_id: `projects:intent:${selectedProjectKey}`,
           label: "작업 지시",
+        },
+      ],
+    });
+
+    components.push({
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: selectedMode === "background" ? 3 : 2,
+          custom_id: `projects:background:${selectedProjectKey}`,
+          label: "백그라운드 시작",
+          disabled: selectedMode === "background",
+        },
+        {
+          type: 2,
+          style: selectedMode === "foreground" ? 1 : 2,
+          custom_id: `projects:foreground:${selectedProjectKey}`,
+          label: "앱 복귀",
+          disabled: selectedMode === "foreground",
         },
       ],
     });
@@ -295,11 +328,45 @@ function summarizeSelectedProject(project) {
   return [
     `project: ${project.project_key}`,
     `display: ${project.display_name ?? project.project_key}`,
+    `mode: ${project.mode ?? "manual"}`,
     `goal: ${project.current_goal ?? "none"}`,
     `focus: ${project.current_focus ?? "none"}`,
     `next: ${project.next_smallest_batch ?? "none"}`,
-    "tip: 버튼으로 상태 조회, 채널 고정, 작업 지시를 이어갈 수 있습니다.",
+    "tip: 버튼으로 상태 조회, 채널 고정, 작업 지시, background 시작, 앱 복귀를 이어갈 수 있습니다.",
   ].join("\n");
+}
+
+function summarizeModeUpdate(result) {
+  if (result.route === "project_mode_invalid") {
+    return [
+      "route: project_mode_invalid",
+      `project: ${result.project_key ?? "unknown"}`,
+      `reason: ${result.reason ?? "invalid_mode_target"}`,
+      "tip: background 시작 또는 앱 복귀 중 하나로 다시 시도하세요.",
+    ].join("\n");
+  }
+
+  const lines = ["route: project_mode_updated"];
+  if (result.project?.display_name) {
+    lines.push(`display: ${result.project.display_name}`);
+  }
+  lines.push(`project: ${result.project_key ?? "unknown"}`);
+  lines.push(`mode: ${result.mode_target ?? "unknown"}`);
+  if (result.mode_target === "background") {
+    lines.push(`scheduler: ${result.scheduler_gate?.ready ? "armed" : "blocked"}`);
+    if (result.scheduler_gate?.reasons?.length) {
+      lines.push(`blocked_reasons: ${result.scheduler_gate.reasons.join(", ")}`);
+    }
+    if (result.wake_strategy === "resume_attached_thread") {
+      lines.push("tip: 다음 scheduler tick에서 기존 Codex 스레드를 다시 로드하고, 이후 inbox/dispatch 작업을 이어서 받을 수 있게 합니다.");
+    } else {
+      lines.push("tip: approval 대기나 must_human_check가 있으면 background는 계속 차단됩니다.");
+    }
+  } else if (result.mode_target === "foreground") {
+    lines.push("scheduler: blocked_expected");
+    lines.push("tip: 이제 이 채널의 작업은 foreground 메인 기준으로 이어집니다.");
+  }
+  return lines.join("\n");
 }
 
 function summarizeProjectResolutionHelp(result) {
@@ -370,6 +437,8 @@ function summarizeThreadAttachResult(result) {
 }
 
 function summarizeIngress(normalized, result) {
+  const resolvedProjectKey = result.project_key ?? normalized.project_key ?? "_unresolved";
+
   if (result.route === "projects") {
     return summarizeProjects(result.projects, result.attachable_threads ?? [], result.attach_scope ?? "recommended");
   }
@@ -390,11 +459,15 @@ function summarizeIngress(normalized, result) {
     return summarizeThreadAttachResult(result);
   }
 
+  if (result.route === "project_mode_updated" || result.route === "project_mode_invalid") {
+    return summarizeModeUpdate(result);
+  }
+
   if (result.route === "channel_binding") {
     return [
       "route: channel_binding",
       ...(result.project?.display_name ? [`display: ${result.project.display_name}`] : []),
-      `project: ${result.project_key ?? "_unresolved"}`,
+      `project: ${resolvedProjectKey}`,
       `resolved_via: ${result.resolved_via ?? "explicit"}`,
       "tip: 이제 같은 채널에서는 /status, /intent 에서 project를 생략할 수 있습니다.",
     ].join("\n");
@@ -407,7 +480,7 @@ function summarizeIngress(normalized, result) {
   if (result.route === "quarantine") {
     return [
       `route: quarantine`,
-      `project: ${normalized.project_key ?? "_unresolved"}`,
+      `project: ${resolvedProjectKey}`,
       `reason: ${result.quarantine_reason ?? "unknown"}`,
     ].join("\n");
   }
@@ -415,7 +488,7 @@ function summarizeIngress(normalized, result) {
   if (result.route === "human_gate_candidate") {
     return [
       `route: human_gate_candidate`,
-      `project: ${normalized.project_key ?? "_unresolved"}`,
+      `project: ${resolvedProjectKey}`,
       `source_ref: ${normalized.source_ref}`,
       `state: await_human_gate`,
     ].join("\n");
@@ -423,7 +496,7 @@ function summarizeIngress(normalized, result) {
 
   return [
     `route: ${result.route}`,
-    `project: ${normalized.project_key ?? "_unresolved"}`,
+    `project: ${resolvedProjectKey}`,
     `delivery: ${result.delivery_decision ?? "unknown"}`,
     `source_ref: ${normalized.source_ref}`,
   ].join("\n");
@@ -455,10 +528,16 @@ export async function processGatewayInteraction({
   }
 
   if (interaction.type === 3) {
+    const shouldDeferUpdate = shouldDeferComponentInteraction(interaction);
+    if (shouldDeferUpdate) {
+      await callbackTransport.deferUpdateMessage(interaction);
+    }
     const outcome = await runtime.handleInteractionPayload(interaction);
     const messageBody = buildComponentMessageBody(outcome);
     if (outcome.response_plan?.initial_response === "modal") {
       await callbackTransport.openModal(interaction, messageBody);
+    } else if (shouldDeferUpdate) {
+      await callbackTransport.editOriginalResponse(interaction, messageBody);
     } else {
       await callbackTransport.updateMessage(interaction, messageBody);
     }
@@ -480,6 +559,15 @@ export async function processGatewayInteraction({
   };
 }
 
+function shouldDeferComponentInteraction(interaction) {
+  const customId = String(interaction?.data?.custom_id ?? "");
+  if (!customId) return true;
+  if (customId.startsWith("projects:intent:")) return false;
+  if (customId === "projects:create") return false;
+  if (customId === "projects:attach_manual") return false;
+  return true;
+}
+
 function buildDeferredMessageBody(outcome, content) {
   const messageBody = {
     content,
@@ -496,6 +584,8 @@ function buildDeferredMessageBody(outcome, content) {
     outcome.result.route === "thread_attached_existing" ||
     outcome.result.route === "thread_attach_invalid" ||
     outcome.result.route === "channel_binding" ||
+    outcome.result.route === "project_mode_updated" ||
+    outcome.result.route === "project_mode_invalid" ||
     outcome.result.route === "status"
   ) {
     const selectedProjectKey = outcome.result.project_key ?? null;
@@ -545,7 +635,9 @@ function buildComponentMessageBody(outcome) {
     outcome.result.route === "create_project_invalid" ||
     outcome.result.route === "thread_attached" ||
     outcome.result.route === "thread_attached_existing" ||
-    outcome.result.route === "thread_attach_invalid"
+    outcome.result.route === "thread_attach_invalid" ||
+    outcome.result.route === "project_mode_updated" ||
+    outcome.result.route === "project_mode_invalid"
   ) {
     const selectedProjectKey =
       outcome.result.project_key ??

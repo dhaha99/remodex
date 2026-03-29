@@ -53,8 +53,10 @@ Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler 
 - project-scoped namespace / coordinator binding / status mirror
 - `status`, `intent`, `reply`, `approve-candidate` operator ingress
 - `projects`, project 자동완성, `/use-project` 채널 기본 프로젝트 바인딩
+- `background-on`, `foreground-on` Discord mode 전환
 - channel binding 또는 single-project default 기반 `project` 생략 UX
 - `/projects` 선택 카드, 상태/고정/작업지시 버튼, 작업지시 modal
+- project 카드의 `백그라운드 시작` / `앱 복귀` 버튼
 - dispatch queue arbitration
 - foreground/background toggle
 - human gate candidate / foreground-only closure
@@ -149,8 +151,11 @@ node ops/render_scheduler_artifacts.mjs
 3. attach가 끝나면 같은 카드에서 `상태 보기`, `이 채널에 고정`, `작업 지시` 버튼을 바로 쓸 수 있다.
 4. 자주 쓰는 채널에서는 `/use-project project:<project-key-or-alias>` 또는 `이 채널에 고정` 버튼으로 기본 프로젝트를 지정한다.
 5. 기본 프로젝트가 잡힌 채널에서는 `/status`, `/intent`, `/reply`에서 `project`를 생략할 수 있다.
-6. 기존 Codex thread도 없고 shared memory 등록 프로젝트도 없을 때만 `/create-project` 또는 `새 프로젝트 등록` 버튼으로 bootstrap한다.
-7. `작업 지시` 버튼은 modal을 열고, 입력한 문장은 intent inbox로 기록된다.
+6. 같은 카드에서 `백그라운드 시작`, `앱 복귀` 버튼으로 foreground/background 모드를 바꿀 수 있다.
+   - slash command로는 `/background-on`, `/foreground-on`을 쓴다.
+   - background로 바꿔도 `approval 대기`, `must_human_check`, `pending_human_gate`가 있으면 scheduler는 계속 차단된다.
+7. 기존 Codex thread도 없고 shared memory 등록 프로젝트도 없을 때만 `/create-project` 또는 `새 프로젝트 등록` 버튼으로 bootstrap한다.
+8. `작업 지시` 버튼은 modal을 열고, 입력한 문장은 intent inbox로 기록된다.
 
 ### 3. Dashboard
 
