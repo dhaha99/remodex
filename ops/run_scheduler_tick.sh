@@ -14,11 +14,11 @@ fi
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
 : "${REMODEX_SHARED_BASE:=$REMODEX_WORKSPACE/runtime/external-shared-memory}"
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
-: "${REMODEX_NODE_BIN:=/opt/homebrew/bin/node}"
+: "${REMODEX_NODE_BIN:=node}"
 
 export REMODEX_WORKSPACE
 export REMODEX_SHARED_BASE
 export REMODEX_WORKSPACE_KEY
+export REMODEX_NODE_BIN
 
 exec "$REMODEX_NODE_BIN" "$REMODEX_WORKSPACE/scripts/remodex_scheduler_tick.mjs"
-

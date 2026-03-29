@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const DEFAULT_STATE_BASENAMES = [
   "project_identity",
@@ -181,7 +182,7 @@ export async function readNamedRuntime(paths, basename) {
 
 async function atomicWrite(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${crypto.randomUUID()}`;
   await fs.writeFile(tempPath, content);
   await fs.rename(tempPath, filePath);
 }

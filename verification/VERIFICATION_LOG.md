@@ -2554,3 +2554,1596 @@
 ### Strategy Impact
 - production bootstrap은 probe용 plist를 재사용하는 대신 env-driven renderer와 wrapper 조합으로 고정하는 편이 맞다.
 - launchd asset도 strategy/WBS 바깥 부속물이 아니라 운영 통제면의 일부로 관리해야 한다.
+
+## 2026-03-27 - Probe 53: dashboard read model (portfolio / detail / timeline / human gate / incident)
+
+### Goal
+- 대시보드 read model이 project별 shared memory truth를 읽어 portfolio overview, project detail, timeline, human gate view, incident view를 일관되게 구성하는지 검증한다.
+
+### Setup
+- Probe script: [/Users/mymac/my dev/remodex/scripts/probe_dashboard_read_model.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_dashboard_read_model.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/dashboard_read_model_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/dashboard_read_model_probe_summary.json)
+- Runtime library:
+  - [/Users/mymac/my dev/remodex/scripts/lib/dashboard_read_model.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/dashboard_read_model.mjs)
+
+### Result
+- Status: PASS
+- 2개 project fixture에서 blocked alpha, processed beta, stale inflight, pending human gate, quarantine accumulation이 portfolio/detail/incident view에 정확히 반영됐다.
+
+### Evidence
+- project count `2`
+- alpha incidents:
+  - `must_human_check`
+  - `pending_human_gate`
+  - `stale_inflight_delivery`
+  - `quarantine_accumulation`
+- beta last processed correlation `beta-correlation-001`
+- timeline kinds:
+  - `scheduler_decision`
+  - `outbox:human_gate_notification`
+  - `human_gate_candidate`
+  - `coordinator_status`
+  - `inflight_delivery`
+- human gate count `1`
+
+### Observed Behaviors
+- 현재 runtime truth만으로도 portfolio, detail, incident view는 충분히 구성 가능하다.
+- timeline은 `processed/*`, `router/outbox/*`, `scheduler_runtime.json`, `coordinator_status.json`, `inflight_delivery.json` 조합만으로도 운영 판단에 필요한 흐름을 보여줄 수 있다.
+
+### Strategy Impact
+- dashboard는 별도 DB 없이 shared memory read model만으로도 MVP를 성립시킬 수 있다.
+- incident view는 `must_human_check`, `pending_human_gate`, stale inflight, quarantine accumulation을 1차 우선순위로 보여주는 편이 맞다.
+
+## 2026-03-27 - Probe 54: dashboard HTTP root + JSON endpoints
+
+### Goal
+- read model 위에 얹은 dashboard server가 HTML root와 핵심 JSON endpoint를 read-only로 정상 제공하는지 검증한다.
+
+### Setup
+- Server entry: [/Users/mymac/my dev/remodex/scripts/remodex_dashboard_server.mjs](/Users/mymac/my%20dev/remodex/scripts/remodex_dashboard_server.mjs)
+- Fixture: Probe 53의 shared memory fixture 재사용
+- Verified endpoints:
+  - `/`
+  - `/health`
+  - `/api/portfolio`
+  - `/api/projects/project-alpha`
+  - `/api/human-gates`
+  - `/api/incidents`
+
+### Result
+- Status: PASS
+- local HTTP root는 HTML을 반환했고, JSON endpoint는 portfolio / project detail / human gate / incident payload를 정확히 반환했다.
+
+### Evidence
+- `/health` project count `2`
+- `/api/portfolio`:
+  - `project-beta` idle + last processed `beta-correlation-001`
+  - `project-alpha` blocked + pending human gate `1`
+- `/api/projects/project-alpha`:
+  - pending approval `1`
+  - human gate candidate `1`
+  - inflight delivery `1`
+- `/api/human-gates` entry `1`
+- `/api/incidents` entry `4`
+
+### Observed Behaviors
+- sandbox에서는 local port bind가 차단돼 권한 상승이 필요했다.
+- server는 read-only adapter 위에 얹혀 있으므로 write side effect 없이 운영 truth를 그대로 보여줄 수 있다.
+
+### Strategy Impact
+- dashboard server는 bridge/scheduler와 경쟁하는 제어면이 아니라 별도 관측면으로 분리 유지하는 편이 맞다.
+- `/health`, `/api/portfolio`, `/api/projects/:projectKey`, `/api/human-gates`, `/api/incidents`는 MVP 기준 최소 공개면으로 충분하다.
+
+## 2026-03-27 - Probe 55: scheduler adapter abstraction
+
+### Goal
+- scheduler bootstrap을 macOS `launchd` 전용 스크립트에서 분리해 generic renderer 경계를 만들고, unsupported scheduler kind를 fail-closed 하는지 검증한다.
+
+### Setup
+- Generic renderer: [/Users/mymac/my dev/remodex/ops/render_scheduler_artifacts.mjs](/Users/mymac/my%20dev/remodex/ops/render_scheduler_artifacts.mjs)
+- Adapter library: [/Users/mymac/my dev/remodex/ops/lib/scheduler_adapter.mjs](/Users/mymac/my%20dev/remodex/ops/lib/scheduler_adapter.mjs)
+- Legacy compatibility entrypoint: [/Users/mymac/my dev/remodex/ops/render_launchd_plists.mjs](/Users/mymac/my%20dev/remodex/ops/render_launchd_plists.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/scheduler_adapter_abstraction_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/scheduler_adapter_abstraction_probe_summary.json)
+
+### Result
+- Status: PASS
+- generic renderer는 `launchd_launchagent` artifact를 정상 생성했고, legacy `render_launchd_plists.mjs`도 compatibility entrypoint로 계속 동작했다.
+- unsupported `windows_task_scheduler` 값은 즉시 실패하며 fail-closed 됐다.
+
+### Evidence
+- supported scheduler kinds:
+  - `launchd_launchagent`
+- generated artifacts:
+  - `com.remodex.bridge-daemon.plist`
+  - `com.remodex.scheduler-tick.plist`
+- legacy renderer output:
+  - `deprecated_entrypoint: ops/render_launchd_plists.mjs`
+- unsupported kind:
+  - `REMODEX_SCHEDULER_KIND=windows_task_scheduler` -> `Unsupported REMODEX_SCHEDULER_KIND`
+- `zsh -n` shell validation:
+  - `ops/install_launchd_services.sh`
+  - `ops/uninstall_launchd_services.sh`
+  - `ops/run_bridge_daemon.sh`
+  - `ops/run_scheduler_tick.sh`
+
+### Observed Behaviors
+- scheduler kind를 generic env key로 끌어올리면 launchd asset 생성 경계와 future Windows adapter 경계를 분리할 수 있다.
+- launchd install/uninstall helper가 unsupported scheduler kind에서 fail-closed 되므로 잘못된 OS bootstrap을 우회 실행하기 어렵다.
+
+### Strategy Impact
+- `10.3.1 scheduler adapter abstraction`은 완료로 볼 수 있다.
+- 다음 smallest batch는 Windows Task Scheduler 쪽 wrapper/bootstrap 구현이다.
+
+## 2026-03-27 - Probe 56: Windows bootstrap assets and path normalization
+
+### Goal
+- Windows Task Scheduler bootstrap asset이 실제로 생성 가능한지 검증한다.
+- 핵심 runtime/adapter 경로에 macOS 절대 경로와 Homebrew Node 기본값이 남아 있지 않은지 확인한다.
+- PowerShell bootstrap 자산이 현재 macOS 검증 환경에서 어디까지 증명됐는지 경계를 남긴다.
+
+### Setup
+- Adapter library: [/Users/mymac/my dev/remodex/ops/lib/scheduler_adapter.mjs](/Users/mymac/my%20dev/remodex/ops/lib/scheduler_adapter.mjs)
+- Generic renderer: [/Users/mymac/my dev/remodex/ops/render_scheduler_artifacts.mjs](/Users/mymac/my%20dev/remodex/ops/render_scheduler_artifacts.mjs)
+- Windows wrappers:
+  - [/Users/mymac/my dev/remodex/ops/lib/RemodexEnv.ps1](/Users/mymac/my%20dev/remodex/ops/lib/RemodexEnv.ps1)
+  - [/Users/mymac/my dev/remodex/ops/run_bridge_daemon.ps1](/Users/mymac/my%20dev/remodex/ops/run_bridge_daemon.ps1)
+  - [/Users/mymac/my dev/remodex/ops/run_scheduler_tick.ps1](/Users/mymac/my%20dev/remodex/ops/run_scheduler_tick.ps1)
+  - [/Users/mymac/my dev/remodex/ops/install_windows_scheduled_tasks.ps1](/Users/mymac/my%20dev/remodex/ops/install_windows_scheduled_tasks.ps1)
+  - [/Users/mymac/my dev/remodex/ops/uninstall_windows_scheduled_tasks.ps1](/Users/mymac/my%20dev/remodex/ops/uninstall_windows_scheduled_tasks.ps1)
+- Summary output: [/Users/mymac/my dev/remodex/verification/windows_bootstrap_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/windows_bootstrap_assets_probe_summary.json)
+
+### Result
+- Status: PASS
+- generic renderer는 `windows_task_scheduler` artifact를 정상 생성했다.
+- 생성된 XML 두 개는 `xmllint --noout`를 통과했다.
+- 핵심 runtime/adapter 경계에서 하드코딩된 macOS workspace path와 `/opt/homebrew/bin/node` 기본값을 제거했다.
+- 현재 macOS 검증 환경에는 `pwsh`/`powershell`이 없어 실제 Windows 실행 증거는 아직 없다.
+
+### Evidence
+- generated Windows artifacts:
+  - [/Users/mymac/my dev/remodex/ops/windows-task-scheduler/generated/Remodex-BridgeDaemon.xml](/Users/mymac/my%20dev/remodex/ops/windows-task-scheduler/generated/Remodex-BridgeDaemon.xml)
+  - [/Users/mymac/my dev/remodex/ops/windows-task-scheduler/generated/Remodex-SchedulerTick.xml](/Users/mymac/my%20dev/remodex/ops/windows-task-scheduler/generated/Remodex-SchedulerTick.xml)
+- XML validation:
+  - `xmllint --noout bridge.xml scheduler.xml` -> PASS
+- hardcoded path scan:
+  - `scripts/remodex_bridge_daemon.mjs`
+  - `scripts/remodex_scheduler_tick.mjs`
+  - `scripts/remodex_dashboard_server.mjs`
+  - `ops/lib/scheduler_adapter.mjs`
+  - `ops/remodex.env.example`
+  - `ops/install_launchd_services.sh`
+  - `ops/run_bridge_daemon.ps1`
+  - `ops/run_scheduler_tick.ps1`
+  - result -> no match
+- PowerShell runtime:
+  - `command -v pwsh || command -v powershell` -> no local runtime
+
+### Observed Behaviors
+- Task Scheduler XML은 UTF-8로 생성하고 installer도 UTF-8로 읽는 편이 현재 bootstrap 자산과 정적 검증 모두에 더 잘 맞는다.
+- Windows bootstrap asset과 Windows execution evidence는 같은 것이 아니다. asset은 준비됐지만 실제 Windows host probe는 아직 남아 있다.
+
+### Strategy Impact
+- `10.3.2 PowerShell wrapper / bootstrap`은 완료로 볼 수 있다.
+- `EP-930 Windows Runtime Adapter`는 asset 기준으로 완료 처리 가능하다.
+- Windows pilot 전에는 bootstrap asset이 아니라 Windows host probe evidence를 별도 패키지로 수집해야 한다.
+
+## 2026-03-27 - Probe 57: macOS smoke bootstrap and metrics collection
+
+### Goal
+- macOS soak 실행 전에 metrics collector와 smoke runner가 실제 artifact를 남기는지 확인한다.
+- sandbox 제약이 metrics에 어떤 식으로 드러나는지 미리 기록한다.
+
+### Setup
+- Collector: [/Users/mymac/my dev/remodex/ops/collect_macos_runtime_metrics.sh](/Users/mymac/my%20dev/remodex/ops/collect_macos_runtime_metrics.sh)
+- Runner: [/Users/mymac/my dev/remodex/ops/run_macos_smoke.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_smoke.sh)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_smoke_bootstrap_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_smoke_bootstrap_probe_summary.json)
+- Temporary metrics dir: `/tmp/remodex-smoke-metrics-3`
+
+### Result
+- Status: PASS
+- smoke runner는 짧은 실행에서도 `summary.json`, `ps-snapshots`, `ports`, `disk`, `health` artifact를 남겼다.
+- `ps` 수집은 현재 sandbox에서 차단됐지만, 실패가 터미널이 아니라 snapshot 파일 안에 기록되도록 고정했다.
+- port snapshot은 `codex app-server` listener를 정상 기록했다.
+
+### Evidence
+- summary file: `/tmp/remodex-smoke-metrics-3/summary.json`
+- sample count: `2`
+- generated dirs:
+  - `/tmp/remodex-smoke-metrics-3/ps-snapshots`
+  - `/tmp/remodex-smoke-metrics-3/ports`
+  - `/tmp/remodex-smoke-metrics-3/disk`
+  - `/tmp/remodex-smoke-metrics-3/health`
+- latest port snapshot recorded:
+  - `codex ... TCP 127.0.0.1:4517 (LISTEN)`
+- latest ps snapshot recorded:
+  - `operation not permitted: ps`
+
+### Observed Behaviors
+- metrics bootstrap 자체는 동작한다.
+- 다만 `ps` 기반 RSS/CPU 수집은 현재 sandbox 제약을 받으므로, final soak verdict에는 host-side 재수집이 필요하다.
+
+### Strategy Impact
+- `10.4.1 30min smoke`는 이제 계획만 있는 상태가 아니라 실행 harness까지 갖췄다.
+- 다음 smallest batch는 실제 30분 smoke를 돌리고 summary verdict를 남기는 것이다.
+
+## 2026-03-27 - Probe 58: macOS smoke stack assets and fixture bootstrap
+
+### Goal
+- `10.4.1` 시나리오에 필요한 dashboard wrapper, smoke fixture bootstrap, stack runner가 존재하는지 검증한다.
+- 최소 project fixture가 실제 shared memory layout에 맞게 seed 되는지 확인한다.
+
+### Setup
+- Dashboard wrapper: [/Users/mymac/my dev/remodex/ops/run_dashboard_server.sh](/Users/mymac/my%20dev/remodex/ops/run_dashboard_server.sh)
+- Fixture bootstrap: [/Users/mymac/my dev/remodex/ops/bootstrap_macos_smoke_fixture.mjs](/Users/mymac/my%20dev/remodex/ops/bootstrap_macos_smoke_fixture.mjs)
+- Stack runner: [/Users/mymac/my dev/remodex/ops/run_macos_smoke_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_smoke_stack.sh)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_smoke_stack_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_smoke_stack_assets_probe_summary.json)
+- Fixture target: `/tmp/remodex-smoke-fixture/remodex/projects/project-smoke`
+
+### Result
+- Status: PASS
+- shell wrapper 세 개는 `zsh -n`을 통과했다.
+- fixture bootstrap은 `project-smoke` namespace를 만들고 `idle` coordinator status, foreground-active toggle, strategy binding을 seed 했다.
+
+### Evidence
+- fixture bootstrap result:
+  - `project_key`: `project-smoke`
+  - `thread_id`: `019d2283-c8bd-76e2-93ec-207a4888dfbd`
+  - `root`: `/tmp/remodex-smoke-fixture/remodex/projects/project-smoke`
+- seeded files:
+  - `/tmp/remodex-smoke-fixture/remodex/projects/project-smoke/state/coordinator_status.json`
+  - `/tmp/remodex-smoke-fixture/remodex/projects/project-smoke/state/background_trigger_toggle.json`
+  - `/tmp/remodex-smoke-fixture/remodex/projects/project-smoke/state/strategy_binding.json`
+- coordinator status:
+  - `type = idle`
+- toggle:
+  - `background_trigger_enabled = false`
+  - `foreground_session_active = true`
+
+### Observed Behaviors
+- 이제 `10.4.1`은 metrics collector만 있는 상태가 아니라, bridge/dashboard/scheduler를 함께 태울 수 있는 stack harness 단계까지 올라왔다.
+- 아직 full stack host execution evidence는 없으므로, 이 probe만으로 `10.4.1` pass를 선언하면 안 된다.
+
+### Strategy Impact
+- 실제 30분 stack run만 끝나면 `10.4.1` verdict를 낼 준비가 됐다.
+- 다음 smallest batch는 host-side stack execution과 summary capture다.
+
+## 2026-03-27 - Probe 59: 1s host-side macOS smoke stack
+
+### Goal
+- bridge, dashboard, scheduler, metrics collector를 함께 올린 host-side smoke stack이 실제로 동작하는지 짧게 확인한다.
+- `10.4.1`의 긴 30분 run 전에 orchestration 자체가 깨지지 않는지 본다.
+
+### Setup
+- Stack runner: [/Users/mymac/my dev/remodex/ops/run_macos_smoke_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_smoke_stack.sh)
+- Fixture bootstrap: [/Users/mymac/my dev/remodex/ops/bootstrap_macos_smoke_fixture.mjs](/Users/mymac/my%20dev/remodex/ops/bootstrap_macos_smoke_fixture.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_smoke_stack_host_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_smoke_stack_host_probe_summary.json)
+- Temporary paths:
+  - fixture: `/tmp/remodex-smoke-stack-fixture`
+  - metrics: `/tmp/remodex-stack-metrics`
+  - stack logs: `/tmp/remodex-stack-runtime`
+
+### Result
+- Status: PASS
+- 1초 host-side stack run이 summary, fixture, metrics, bridge health, dashboard health, scheduler result 파일을 모두 남겼다.
+- bridge `/health`는 `ok: true`, dashboard `/health`는 `project_count: 1`을 반환했다.
+- scheduler tick은 seeded project를 읽고 `blocked` 결정과 expected reasons를 남겼다.
+
+### Evidence
+- stack summary: `/tmp/remodex-stack-runtime/summary.json`
+- fixture:
+  - `/tmp/remodex-smoke-stack-fixture/remodex/projects/project-alpha/state/coordinator_status.json`
+  - `/tmp/remodex-smoke-stack-fixture/remodex/projects/project-alpha/runtime/scheduler_runtime.json`
+- bridge health:
+  - `{"ok":true,"workspace_key":"remodex","shared_base":"/tmp/remodex-smoke-stack-fixture","ws_connected":false}`
+- dashboard health:
+  - `project_count = 1`
+- scheduler decision:
+  - `decision = blocked`
+  - reasons:
+    - `background_trigger_disabled`
+    - `foreground_session_active`
+- portfolio view:
+  - `project-alpha`
+  - `scheduler_decision = blocked`
+- metrics port snapshot:
+  - `127.0.0.1:4517` listener observed
+
+### Observed Behaviors
+- full stack orchestration은 동작한다.
+- 현재 fixture는 foreground-active baseline이라 scheduler가 blocked로 머무는 것이 정상이다.
+- bridge는 app-server ws 없이도 `/health`와 shared memory boundary를 유지한다.
+
+### Strategy Impact
+- `10.4.1`은 이제 collector bootstrap이나 fixture seed 수준이 아니라, host-side orchestration short run까지 검증됐다.
+- 다음 smallest batch는 더 이상 자산 보강이 아니라 실제 30분 host stack run과 verdict 캡처다.
+
+## 2026-03-27 - Probe 60: 30min host-side macOS smoke stack
+
+### Goal
+- `10.4.1` baseline stack stability를 실제 30분 동안 검증한다.
+- bridge/dashboard/scheduler/metrics가 함께 떠 있어도 loopback 경계와 기본 health가 유지되는지 확인한다.
+
+### Setup
+- Stack runner: [/Users/mymac/my dev/remodex/ops/run_macos_smoke_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_smoke_stack.sh)
+- Verdict summarizer: [/Users/mymac/my dev/remodex/ops/summarize_macos_smoke_stack.mjs](/Users/mymac/my%20dev/remodex/ops/summarize_macos_smoke_stack.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_30min_smoke_stack_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_30min_smoke_stack_probe_summary.json)
+- Runtime artifacts:
+  - `/tmp/remodex-stack-30m-runtime/summary.json`
+  - `/tmp/remodex-stack-30m-runtime/verdict.json`
+  - `/tmp/remodex-stack-30m-metrics/*`
+
+### Result
+- Status: PASS
+- 30분 host-side stack run이 정상 종료됐다.
+- verdict summarizer는 `pass`를 반환했다.
+- non-loopback bind는 없었고, bridge/dashboard health는 유지됐다.
+- scheduler는 foreground baseline fixture에 맞게 `blocked`를 유지했다.
+
+### Evidence
+- run duration:
+  - `started_at = 2026-03-27T17:52:18+09:00`
+  - `completed_at = 2026-03-27T18:33:49+09:00`
+- sample count:
+  - `10`
+- peak metrics:
+  - `peak_rss_kb = 649328`
+  - `peak_cpu_pct = 38.6`
+- permission noise:
+  - `ps_permission_denied_count = 0`
+- bind safety:
+  - `non_loopback_bind_count = 0`
+- latest bridge health:
+  - `ok = true`
+- latest dashboard health:
+  - `ok = true`
+  - `project_count = 1`
+- latest scheduler decision:
+  - `blocked`
+  - reasons:
+    - `background_trigger_disabled`
+    - `foreground_session_active`
+- latest port snapshot:
+  - `127.0.0.1:4517`
+  - `127.0.0.1:8788`
+  - `127.0.0.1:8791`
+- cleanup:
+  - post-run `lsof -iTCP:8788 -iTCP:8791 -sTCP:LISTEN` returned no lingering listeners
+
+### Observed Behaviors
+- current `10.4.1` scope에서는 bridge의 `ws_connected`가 `false`여도 baseline stack stability 판단에는 문제가 없다. 이 배치는 delivery churn이 아니라 orchestration baseline을 보는 단계다.
+- port, health, scheduler blocked reason, metrics capture가 30분 동안 같이 유지됐다.
+
+### Strategy Impact
+- `10.4.1 30min smoke`는 완료 처리 가능하다.
+- 다음 active batch는 `10.4.2 6h churn + 24h overnight`다.
+
+## 2026-03-27 - Probe 61: short host-side macOS churn stack
+
+### Goal
+- `10.4.2` 진입 전에 실제 churn harness가 signed ingress, foreground defer, background delivery, human gate 보존, quarantine을 함께 유지하는지 확인한다.
+- 오래된 probe thread id나 bridge signing bootstrap 누락 같은 실행 자산 결함이 없는지 확인한다.
+
+### Setup
+- Churn fixture bootstrap: [/Users/mymac/my dev/remodex/ops/bootstrap_macos_churn_fixture.mjs](/Users/mymac/my%20dev/remodex/ops/bootstrap_macos_churn_fixture.mjs)
+- Churn driver: [/Users/mymac/my dev/remodex/ops/run_macos_churn_driver.mjs](/Users/mymac/my%20dev/remodex/ops/run_macos_churn_driver.mjs)
+- Churn stack runner: [/Users/mymac/my dev/remodex/ops/run_macos_churn_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_churn_stack.sh)
+- Churn verdict summarizer: [/Users/mymac/my dev/remodex/ops/summarize_macos_churn_stack.mjs](/Users/mymac/my%20dev/remodex/ops/summarize_macos_churn_stack.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_short_churn_stack_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_short_churn_stack_probe_summary.json)
+- Runtime artifacts:
+  - `/tmp/remodex-churn-probe3-runtime/summary.json`
+  - `/tmp/remodex-churn-probe3-runtime/verdict.json`
+  - `/tmp/remodex-churn-probe3-runtime/driver_events.jsonl`
+  - `/tmp/remodex-churn-probe3-metrics/*`
+
+### Result
+- Status: PASS
+- 짧은 host-side churn stack run이 정상 종료됐다.
+- verdict summarizer는 `pass`를 반환했다.
+- live signed ingress가 bridge에 들어가고, alpha는 실제 delivery evidence를 남겼고, beta는 human gate 후보가 background에 소비되지 않은 채 유지됐다.
+- unauthorized approval은 quarantine으로만 기록됐다.
+
+### Evidence
+- sample count:
+  - `6`
+- peak metrics:
+  - `peak_rss_kb = 603184`
+  - `peak_cpu_pct = 139.3`
+- bind safety:
+  - `non_loopback_bind_count = 0`
+- bridge/dashboard health:
+  - `bridge ok = true`
+  - `dashboard ok = true`
+  - `bridge ws_connected = true`
+- alpha delivery:
+  - `alpha_processed_count = 3`
+  - `alpha_target_line_count = 3`
+  - target file:
+    - `alpha-queued-0000`
+    - `alpha-direct-0002`
+    - `alpha-queued-0004`
+- beta safety:
+  - `beta_human_gate_count = 1`
+  - `beta_processed_count = 0`
+- quarantine:
+  - `quarantine_count = 1`
+- scheduler decisions:
+  - `blocked = 10`
+  - `dispatch_queue = 2`
+- blocked reasons:
+  - `background_trigger_disabled = 2`
+  - `foreground_session_active = 2`
+  - `pending_human_gate = 6`
+  - `status_waiting_on_approval = 6`
+  - `status_active = 2`
+
+### Observed Behaviors
+- churn runner가 bridge에 Discord public key path를 넘기지 않으면 모든 interaction이 `discord_public_key_not_configured`로 막힌다. 이 배선은 runner에서 export 하도록 수정했다.
+- 과거 probe summary의 thread id를 그대로 재사용하면 현재 app-server state에서 `thread not found`가 날 수 있다. churn bootstrap은 이제 live app-server가 있으면 그 자리에서 새 thread를 만들어 바인딩한다.
+- scheduler 산출물 중 일부가 비어 있어도 verdict 전체를 죽이면 안 된다. summarizer는 이제 비어 있거나 깨진 JSON 샘플을 건너뛴다.
+
+### Strategy Impact
+- `10.4.2`는 아직 완료가 아니지만, 짧은 host-side churn harness는 실증됐다.
+- 다음 smallest batch는 이제 자산 보강이 아니라 실제 `6h churn run`과 `24h overnight prep`이다.
+
+## 2026-03-28 - Probe 62: 6h host-side macOS churn stack
+
+### Goal
+- `10.4.2`의 본 배치인 6시간 churn을 실제로 완료해 자원 안정성, foreground/background arbitration, repeated delivery, human gate 보존을 확인한다.
+- 짧은 churn probe가 보여준 경계가 장시간 반복에서도 유지되는지 본다.
+
+### Setup
+- Churn runner: [/Users/mymac/my dev/remodex/ops/run_macos_churn_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_churn_stack.sh)
+- Fixture bootstrap: [/Users/mymac/my dev/remodex/ops/bootstrap_macos_churn_fixture.mjs](/Users/mymac/my%20dev/remodex/ops/bootstrap_macos_churn_fixture.mjs)
+- Driver: [/Users/mymac/my dev/remodex/ops/run_macos_churn_driver.mjs](/Users/mymac/my%20dev/remodex/ops/run_macos_churn_driver.mjs)
+- Verdict summarizer: [/Users/mymac/my dev/remodex/ops/summarize_macos_churn_stack.mjs](/Users/mymac/my%20dev/remodex/ops/summarize_macos_churn_stack.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_6h_churn_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_6h_churn_probe_summary.json)
+- Runtime artifacts:
+  - `/tmp/remodex-churn-6h-runtime/summary.json`
+  - `/tmp/remodex-churn-6h-runtime/verdict.json`
+  - `/tmp/remodex-churn-6h-runtime/targets/alpha-delivery.txt`
+  - `/tmp/remodex-churn-6h-metrics/*`
+
+### Result
+- Status: PASS
+- 6시간 host-side churn run이 정상 종료됐다.
+- verdict summarizer는 `pass`를 반환했다.
+- alpha는 반복적인 queued/direct delivery를 유지했고, beta human gate는 background에 소비되지 않았다.
+- bridge/dashboard health는 유지됐고, non-loopback bind는 없었다.
+
+### Evidence
+- run duration:
+  - `started_at = 2026-03-27T20:43:41+09:00`
+  - `completed_at = 2026-03-28T02:43:45+09:00`
+- sample count:
+  - `225`
+- peak metrics:
+  - `peak_rss_kb = 607952`
+  - `peak_cpu_pct = 96`
+- bind safety:
+  - `non_loopback_bind_count = 0`
+- bridge/dashboard:
+  - `bridge ok = true`
+  - `dashboard ok = true`
+  - `bridge ws_connected = true`
+- alpha delivery:
+  - `alpha_processed_count = 112`
+  - `alpha_target_line_count = 112`
+- beta safety:
+  - `beta_human_gate_count = 1`
+  - `beta_processed_count = 0`
+- quarantine:
+  - `quarantine_count = 56`
+- scheduler decisions:
+  - `blocked = 334`
+  - `dispatch_queue = 58`
+  - `noop = 54`
+- blocked reasons:
+  - `background_trigger_disabled = 57`
+  - `foreground_session_active = 57`
+  - `pending_human_gate = 223`
+  - `status_waiting_on_approval = 223`
+  - `status_active = 54`
+  - `no_pending_work = 54`
+
+### Observed Behaviors
+- 6시간 반복에서도 alpha queued/direct intent가 둘 다 유지됐고, `completed_inflight`와 `delivered` 경로가 모두 살아 있었다.
+- beta human gate는 한 번도 background에 소비되지 않았고, unauthorized approval은 quarantine 누적으로만 남았다.
+- 현재 churn harness는 종료 시점을 phase boundary에 맞추지 않기 때문에, 최종 snapshot이 alpha foreground queue를 남긴 상태에서 끝날 수 있다. 이건 즉시 실패는 아니지만 `24h overnight prep`에서 graceful shutdown/drain으로 정리하는 편이 맞다.
+
+### Strategy Impact
+- `10.4.2`의 6h churn 근거는 확보됐다.
+- 다음 active batch는 `24h overnight prep`이다.
+
+## 2026-03-28 - Probe 63: macOS churn graceful shutdown drain
+
+### Goal
+- `24h overnight` 전에 churn harness 종료 시점이 wall-clock 경계에 걸려도 alpha inbox/dispatch가 잔류하지 않도록 graceful shutdown/drain 단계가 실제로 동작하는지 검증한다.
+- 최종 청결성 판정이 `latest portfolio snapshot`이 아니라 `shutdown_drain_summary.json` 기준으로 내려져야 하는지 확인한다.
+
+### Setup
+- Churn runner: [/Users/mymac/my dev/remodex/ops/run_macos_churn_stack.sh](/Users/mymac/my%20dev/remodex/ops/run_macos_churn_stack.sh)
+- Shutdown drain: [/Users/mymac/my dev/remodex/ops/drain_macos_churn_shutdown.mjs](/Users/mymac/my%20dev/remodex/ops/drain_macos_churn_shutdown.mjs)
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_churn_shutdown_drain_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_churn_shutdown_drain_probe_summary.json)
+- Runtime artifacts:
+  - `/tmp/remodex-churn-drain-runtime/summary.json`
+  - `/tmp/remodex-churn-drain-runtime/verdict.json`
+  - `/tmp/remodex-churn-drain-runtime/shutdown_drain_summary.json`
+  - `/tmp/remodex-churn-drain-runtime/targets/alpha-delivery.txt`
+
+### Result
+- Status: PASS
+- 짧은 host-side churn stack이 shutdown drain까지 포함한 상태로 정상 종료됐다.
+- shutdown drain은 alpha `inbox = 0`, `dispatch_queue = 0`, `has_inflight = false`를 남겼다.
+- beta human gate는 background에 소비되지 않았다.
+
+### Evidence
+- stack runtime:
+  - `duration_seconds = 120`
+  - `sample_count = 6`
+- alpha delivery:
+  - `alpha_processed_count = 3`
+  - `alpha_target_line_count = 3`
+- beta safety:
+  - `beta_human_gate_count = 1`
+- quarantine:
+  - `quarantine_count = 1`
+- shutdown drain summary:
+  - `verdict = drained`
+  - `coordinator_status = idle`
+  - `inbox_count = 0`
+  - `dispatch_queue_count = 0`
+  - `processed_count = 3`
+  - `has_inflight = false`
+
+### Observed Behaviors
+- churn harness는 wall-clock 종료 직전 snapshot만 보면 alpha pending이 남아 보일 수 있다.
+- 하지만 shutdown drain이 끝난 뒤 실제 파일 시스템과 `shutdown_drain_summary.json` 기준으로는 alpha pending work가 비워졌다.
+- 따라서 최종 청결성 판정은 `latest portfolio`보다 `shutdown_drain_summary.json`을 우선해야 한다.
+
+### Strategy Impact
+- `24h overnight prep`에서 graceful shutdown/drain은 선택이 아니라 필수 단계로 확정됐다.
+- `24h overnight run`의 최종 verdict도 drain summary를 함께 읽어야 한다.
+
+## 2026-03-28 - Probe 64: 24h overnight runtime checkpoint
+
+### Goal
+- 실제 `24h overnight`가 bootstrap만 통과한 상태가 아니라 runtime cycle을 진행하고 있는지 확인한다.
+- bridge/dashboard health, alpha delivery, beta human gate 보존이 초기 runtime checkpoint에서도 유지되는지 본다.
+
+### Setup
+- Runtime dir: `/tmp/remodex-churn-24h-runtime`
+- Shared base: `/tmp/remodex-churn-24h-fixture`
+- Summary output: [/Users/mymac/my dev/remodex/verification/macos_24h_runtime_checkpoint_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_24h_runtime_checkpoint_probe_summary.json)
+- Health checks:
+  - `curl -sS http://127.0.0.1:8801/health`
+  - `curl -sS http://127.0.0.1:8802/health`
+
+### Result
+- Status: PASS
+- 24시간 run은 cycle `2`까지 진행됐고 driver state는 `next_cycle = 3`을 가리켰다.
+- alpha는 queued/direct delivery 2건을 남겼고, beta human gate는 그대로 유지됐다.
+- bridge/dashboard health endpoint는 loopback에서 모두 정상 응답했다.
+
+### Evidence
+- driver state:
+  - `last_phase = alpha_background_direct`
+  - `next_cycle = 3`
+- bridge health:
+  - `ok = true`
+  - `ws_connected = true`
+- dashboard health:
+  - `ok = true`
+  - `project_count = 2`
+- alpha:
+  - `alpha_target_line_count = 2`
+  - `alpha_processed_count = 2`
+  - latest scheduler decision `blocked` with `status_active`
+- beta:
+  - `human_gate_candidate_count = 1`
+  - latest scheduler decision `blocked` with `pending_human_gate`, `status_waiting_on_approval`
+
+### Observed Behaviors
+- 24시간 run은 초기 bootstrap 이후 실제 delivery cycle로 진입했다.
+- alpha는 foreground queue에서 background delivery로 넘어간 뒤 direct delivery까지 진행했다.
+- beta approval lane은 계속 분리 유지됐고, background에서 human gate candidate를 소비하지 않았다.
+
+### Strategy Impact
+- 현재 active batch는 그대로 `24h overnight runtime monitoring`이다.
+- 다음 smallest batch는 최종 종료 후 `24h overnight final verdict collection`이다.
+
+## 2026-03-28 - Probe 65: Discord Gateway session and event consumer
+
+### Goal
+- canonical ingress 방향으로 정한 `Discord Gateway adapter`의 첫 배치를 로컬에서 검증한다.
+- live Discord 자격증명 없이도 `HELLO -> IDENTIFY -> READY -> INTERACTION_CREATE -> RECONNECT -> RESUME` 경로가 성립하는지 확인한다.
+- Gateway에서 받은 interaction이 shared memory truth로 정규화되어 기존 bridge/runtime 계약을 그대로 재사용하는지 본다.
+
+### Setup
+- Probe script: [scripts/probe_discord_gateway_session.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_session.mjs)
+- Session manager: [scripts/lib/discord_gateway_session.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_gateway_session.mjs)
+- Adapter runtime: [scripts/lib/discord_gateway_adapter_runtime.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_gateway_adapter_runtime.mjs)
+- Runner: [scripts/remodex_discord_gateway_adapter.mjs](/Users/mymac/my%20dev/remodex/scripts/remodex_discord_gateway_adapter.mjs)
+- Summary output: [verification/discord_gateway_session_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_session_probe_summary.json)
+
+### Result
+- Status: PASS
+- 첫 socket은 `HELLO` 뒤 `IDENTIFY`를 보냈고, `READY`에서 `session_id`, `resume_gateway_url`을 획득했다.
+- `INTERACTION_CREATE(status)`는 기존 bridge/runtime 경로로 들어가 `status_response` outbox를 남겼다.
+- `RECONNECT` 뒤 두 번째 socket은 `RESUME`를 보냈고, `RESUMED` 이후 `INTERACTION_CREATE(intent)`를 받아 inbox + dispatch_queue까지 기록했다.
+
+### Evidence
+- first socket:
+  - `url = wss://gateway.discord.example/?v=10&encoding=json`
+  - first sent opcode `2 (IDENTIFY)`
+- READY:
+  - `session_id = session-ready-1`
+  - `resume_gateway_url = wss://resume.discord.example`
+- second socket:
+  - `url = wss://resume.discord.example`
+  - first sent opcode `6 (RESUME)`
+  - `seq = 2`
+- shared memory:
+  - outbox status response 1건 생성
+  - inbox intent 1건 생성
+  - dispatch ticket 1건 생성
+- final session state:
+  - `seq = 4`
+  - state events include `READY`, `INTERACTION_CREATE`, `RESUMED`
+
+### Observed Behaviors
+- Gateway adapter 첫 배치는 public webhook 없이도 local outbound session으로 ingress를 열 수 있는 기반을 제공한다.
+- interaction payload 자체는 기존 `normalizeDiscordInteraction -> BridgeRuntime.handleCommand` 경로를 재사용할 수 있었다.
+- 아직 Discord callback HTTP transport는 없으므로 operator-visible ack/follow-up까지는 닫히지 않았다.
+
+### Strategy Impact
+- `EP-950`는 `in_progress`로 올릴 수 있다.
+- `11.1.1 Discord Gateway session and event consumer`는 완료로 볼 수 있다.
+- 다음 smallest batch는 `11.1.2 interaction ack and follow-up response transport`다.
+
+## 2026-03-28 - Probe 66: Discord Gateway callback transport
+
+### Goal
+- Gateway ingress가 operator-visible 왕복을 만들기 위한 `deferred ack -> original response edit` 경로를 로컬에서 검증한다.
+- public webhook 없이도 local Gateway session이 interaction callback REST를 통해 operator 응답을 돌려줄 수 있는지 확인한다.
+- 기존 shared memory truth를 그대로 유지하면서 status/intent 결과가 callback transport로 요약되는지 본다.
+
+### Setup
+- Probe script: [scripts/probe_discord_gateway_callback_transport.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_callback_transport.mjs)
+- Callback transport: [scripts/lib/discord_interaction_callback_transport.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_interaction_callback_transport.mjs)
+- Operator responder: [scripts/lib/discord_gateway_operator_responder.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_gateway_operator_responder.mjs)
+- Summary output: [verification/discord_gateway_callback_transport_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_callback_transport_probe_summary.json)
+
+### Result
+- Status: PASS
+- `INTERACTION_CREATE(status)`와 `INTERACTION_CREATE(intent)` 모두 먼저 `type = 5` deferred ack를 보냈다.
+- 그 뒤 `PATCH /webhooks/{application_id}/{interaction_token}/messages/@original`로 operator-visible 본문을 수정했다.
+- status는 snapshot 요약을, intent는 `route / delivery / source_ref` 요약을 원본 메시지에 반영했다.
+
+### Evidence
+- ack requests:
+  - count `2`
+  - each `POST /interactions/{id}/{token}/callback`
+  - each body `type = 5`, `flags = 64`
+- edit requests:
+  - count `2`
+  - status body includes `project: project-alpha`, `status: idle`
+  - intent body includes `route: inbox`, `delivery: deferred`
+- shared memory:
+  - status outbox 1건 생성
+  - intent inbox 1건 생성
+  - intent dispatch ticket 1건 생성
+
+### Observed Behaviors
+- Gateway ingress는 이제 세션 소비뿐 아니라 operator-facing ack/edit transport까지 local probe로 증명됐다.
+- 이 단계에서도 raw bridge는 public edge가 아니라 internal runtime으로 남는다.
+- 아직 남은 건 `reply`와 `approval candidate`를 포함한 전체 command family 정규화다.
+
+### Strategy Impact
+- `11.1 interaction ack and follow-up response transport`는 완료로 올릴 수 있다.
+- `11.2 Gateway normalization to shared memory`는 계속 `in_progress`다.
+- 다음 smallest batch는 `11.2.1 status / intent / reply mapping`에서 `reply` 검증을 닫는 것이다.
+
+## 2026-03-28 - Probe 67: Discord Gateway command family mapping
+
+### Goal
+- Gateway ingress에서 남아 있던 command family 정규화를 검증한다.
+- `reply`가 실제로 `operator_reply`로 shared memory에 적재되는지 확인한다.
+- `approve-candidate`가 active approval source와 ACL을 기준으로 `human_gate_candidate` 또는 quarantine으로 정확히 갈리는지 확인한다.
+
+### Setup
+- Probe script: [scripts/probe_discord_gateway_command_mapping.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_command_mapping.mjs)
+- Runtime: [scripts/lib/discord_gateway_adapter_runtime.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_gateway_adapter_runtime.mjs)
+- Responder: [scripts/lib/discord_gateway_operator_responder.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_gateway_operator_responder.mjs)
+- Summary output: [verification/discord_gateway_command_mapping_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_command_mapping_probe_summary.json)
+
+### Result
+- Status: PASS
+- `reply`는 `project-alpha` inbox에 `type = operator_reply`로 적재됐고 dispatch queue도 생성됐다.
+- `approve-candidate`는 `project-beta`가 `waiting_on_approval`이고 `source_ref`가 일치할 때만 `human_gate_candidate`로 적재됐다.
+- 같은 approval candidate라도 `ops-admin` 권한이 없으면 quarantine으로 빠졌다.
+
+### Evidence
+- reply:
+  - inbox record `type = operator_reply`
+  - `source_ref = question-001`
+  - dispatch ticket count `1`
+- approval allowed:
+  - route `human_gate_candidate`
+  - `approval_source_ref = approval-live-001`
+- approval denied:
+  - route `quarantine`
+  - `quarantine_reason = missing_role:ops-admin`
+- callback transport:
+  - 3 interactions each `POST callback + PATCH original`
+  - reply/or approval 결과가 operator-visible 메시지 본문에도 반영됨
+
+### Observed Behaviors
+- `reply`는 `intent`와 같은 inbox lane을 쓰지만, record type이 분리되어 downstream 구분이 가능하다.
+- `approve-candidate`는 현재 활성 approval source와 ACL 둘 다 맞아야만 human gate 후보로 승격된다.
+- Gateway ingress 쪽 command family는 이제 `status`, `intent`, `reply`, `approve-candidate` 네 가지를 모두 정규화할 수 있다.
+
+### Strategy Impact
+- `11.2.1 status / intent / reply mapping`을 완료로 올릴 수 있다.
+- `11.2.2 approval candidate and ACL mapping`도 완료로 올릴 수 있다.
+- 다음 smallest batch는 `11.3.1 no-public-raw-bridge exposure check`다.
+
+## 2026-03-28 - Probe 68: No public raw bridge exposure
+
+### Goal
+- raw bridge daemon이 production Discord edge로 오인되거나 public bind 기본값을 갖지 않는지 정적 검증한다.
+- canonical ingress가 문서와 bootstrap asset 전반에서 `Discord Gateway adapter`로 일관되게 고정되어 있는지 확인한다.
+
+### Setup
+- Probe script: [scripts/probe_no_public_raw_bridge_exposure.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_no_public_raw_bridge_exposure.mjs)
+- Summary output: [verification/no_public_raw_bridge_exposure_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/no_public_raw_bridge_exposure_probe_summary.json)
+- Checked files:
+  - [scripts/remodex_bridge_daemon.mjs](/Users/mymac/my%20dev/remodex/scripts/remodex_bridge_daemon.mjs)
+  - [ops/remodex.env.example](/Users/mymac/my%20dev/remodex/ops/remodex.env.example)
+  - [README.md](/Users/mymac/my%20dev/remodex/README.md)
+  - [PRODUCTION_BOOTSTRAP.md](/Users/mymac/my%20dev/remodex/PRODUCTION_BOOTSTRAP.md)
+  - [NORMAL_OPS_MANUAL.md](/Users/mymac/my%20dev/remodex/NORMAL_OPS_MANUAL.md)
+
+### Result
+- Status: PASS
+- bridge daemon 기본 host는 `127.0.0.1`이다.
+- env example은 operator/dashboard host를 둘 다 loopback으로 고정한다.
+- 운영 문서 3곳 모두 canonical ingress를 `Discord Gateway adapter`로 명시하고 raw bridge를 internal/probe 경계로 제한한다.
+
+### Evidence
+- bridge default:
+  - `REMODEX_OPERATOR_HTTP_HOST ?? "127.0.0.1"`
+- env example:
+  - `REMODEX_OPERATOR_HTTP_HOST="127.0.0.1"`
+  - `REMODEX_DASHBOARD_HTTP_HOST="127.0.0.1"`
+- docs:
+  - README canonical ingress 명시
+  - bootstrap canonical ingress 명시
+  - normal ops manual에서 production ingress owner 명시
+
+### Observed Behaviors
+- 이 저장소는 기본값 기준으로 raw bridge를 public edge로 열지 않는다.
+- `Discord Gateway adapter`가 canonical path라는 운영 전제가 코드/문서/env 샘플 전반에 반영됐다.
+
+### Strategy Impact
+- `11.3.1 no-public-raw-bridge exposure check`를 완료로 올릴 수 있다.
+- `11.3`에서 남은 건 `11.3.2 end-to-end Discord live ingress proof`뿐이다.
+
+## 2026-03-28 - Probe 69: Discord command registration assets
+
+### Goal
+- live Discord proof 직전에 필요한 slash command bootstrap 자산을 정리한다.
+- canonical operator command set이 `status`, `intent`, `reply`, `approve-candidate` 네 개로 고정되어 있는지 확인한다.
+- guild-scoped registration endpoint 계산과 필수 option 구성이 맞는지 검증한다.
+
+### Setup
+- Manifest: [scripts/lib/discord_command_manifest.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/discord_command_manifest.mjs)
+- Registrar: [ops/register_discord_commands.mjs](/Users/mymac/my%20dev/remodex/ops/register_discord_commands.mjs)
+- Summary output: [verification/discord_command_registration_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_command_registration_assets_probe_summary.json)
+
+### Result
+- Status: PASS
+- command manifest는 4개 command를 생성했다.
+- guild registration endpoint 계산은 `applications/{app_id}/guilds/{guild_id}/commands`로 맞았다.
+- `reply`, `approve-candidate` 둘 다 `source_ref`를 required option으로 유지했다.
+
+### Evidence
+- commands:
+  - `status`
+  - `intent`
+  - `reply`
+  - `approve-candidate`
+- endpoint:
+  - `https://discord.com/api/v10/applications/app-123/guilds/guild-123/commands`
+- option constraints:
+  - `reply.source_ref.required = true`
+  - `approve-candidate.source_ref.required = true`
+
+### Observed Behaviors
+- live token 없이도 registration manifest와 endpoint 계산 자체는 local probe로 검증할 수 있다.
+- 이제 live proof 전 bootstrap에서 필요한 남은 외부 의존성은 실제 Discord application id / bot token / guild id 뿐이다.
+
+### Strategy Impact
+- `11.3`의 bootstrap 준비도는 더 올라갔다.
+- 하지만 `11.3.2 end-to-end Discord live ingress proof`는 여전히 실제 자격증명과 외부 연결 없이는 닫을 수 없다.
+
+## 2026-03-28 - Probe 70: 24h overnight final verdict collection
+
+### Goal
+- 24시간 overnight churn이 실제로 끝난 뒤, live app-server 재접속 없이 file truth만으로 최종 verdict를 회수할 수 있는지 확인한다.
+- `summary.json`, `shutdown_drain_summary.json`, `verdict.json`을 재생성해도 최종 청결성 판정이 유지되는지 검증한다.
+
+### Setup
+- Finalizer: [ops/finalize_macos_churn_stack.mjs](/Users/mymac/my%20dev/remodex/ops/finalize_macos_churn_stack.mjs)
+- Summarizer: [ops/summarize_macos_churn_stack.mjs](/Users/mymac/my%20dev/remodex/ops/summarize_macos_churn_stack.mjs)
+- Summary output: [verification/macos_24h_overnight_stack_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_24h_overnight_stack_summary.json)
+- Shutdown drain output: [verification/macos_24h_shutdown_drain_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_24h_shutdown_drain_summary.json)
+- Final verdict: [verification/macos_24h_overnight_final_verdict_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/macos_24h_overnight_final_verdict_probe_summary.json)
+- Runtime source:
+  - `/tmp/remodex-churn-24h-runtime`
+  - `/tmp/remodex-churn-24h-metrics`
+  - `/tmp/remodex-churn-24h-fixture`
+
+### Result
+- Status: PASS
+- offline finalizer가 누락된 `summary.json`과 `shutdown_drain_summary.json`을 재구성했다.
+- 최종 verdict는 `pass`였다.
+- shutdown drain 최종 truth는 `inbox_count = 0`, `dispatch_queue_count = 0`, `has_inflight = false`였다.
+
+### Evidence
+- `sample_count = 62`
+- `duration_seconds = 18300`
+- `alpha_target_line_count = 16`
+- `beta_human_gate_count = 1`
+- `quarantine_count = 7`
+- `non_loopback_bind_count = 0`
+- `shutdown_drain.verdict = drained`
+- `verdict = pass`
+
+### Observed Behaviors
+- 24시간 런 종료 후에도 runtime/metrics/file truth만으로 운영 verdict를 복원할 수 있었다.
+- 최종 청결성은 latest portfolio가 아니라 shutdown drain truth를 우선 봐야 한다는 기존 규칙이 실제로 유효했다.
+- soak 결과는 이제 background 모니터링 중 상태가 아니라 완료 증거로 취급할 수 있다.
+
+### Strategy Impact
+- `EP-940`, `10.4.2`를 완료로 올릴 수 있다.
+- `P10`은 완료고, 현재 남은 main blocker는 `EP-950 / 11.3.2`다.
+
+## 2026-03-28 - Probe 71: Discord Gateway live preflight assets
+
+### Goal
+- 실제 Discord live ingress proof 직전에 필요한 자격증명/loopback/app-server 경계를 코드로 빠르게 점검한다.
+- live proof가 막힐 때 원인이 자격증명인지, non-loopback 노출인지, app-server 경계 문제인지 분리할 수 있게 한다.
+
+### Setup
+- Preflight: [ops/check_discord_gateway_live_preflight.mjs](/Users/mymac/my%20dev/remodex/ops/check_discord_gateway_live_preflight.mjs)
+- Probe script: [scripts/probe_discord_gateway_live_preflight.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_live_preflight.mjs)
+- Summary output: [verification/discord_gateway_live_preflight_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_live_preflight_probe_summary.json)
+
+### Result
+- Status: PASS
+- synthetic env 기준으로 blocker 없이 `ready_for_live_ingress_proof`가 나왔다.
+- token source, application id, guild id, gateway/api/ws URL, loopback host 제약이 모두 preflight에 포함됐다.
+
+### Evidence
+- `gateway_url = wss://gateway.discord.gg/?v=10&encoding=json`
+- `api_base_url = https://discord.com/api/v10`
+- `app_server_ws_url = ws://127.0.0.1:4517`
+- `operator_host = 127.0.0.1`
+- `dashboard_host = 127.0.0.1`
+- `command_names = [status, intent, reply, approve-candidate]`
+- `next_step = ready_for_live_ingress_proof`
+
+### Observed Behaviors
+- 첫 구현에서는 token loader가 전달받은 env 대신 `process.env`를 읽어 synthetic preflight가 실패했고, 즉시 수정 후 PASS로 재검증했다.
+- 이제 live Discord 자격증명을 넣기 전에도 static boundary를 한 번에 확인할 수 있다.
+
+### Strategy Impact
+- `11.3.2`를 시작하기 전 smallest batch가 더 명확해졌다.
+- 실제 남은 건 preflight 통과 후 live Discord credentials로 canonical Gateway ingress를 end-to-end 증명하는 일뿐이다.
+
+## 2026-03-28 - Probe 72: Discord Gateway live proof harness assets
+
+### Goal
+- 실제 Discord 자격증명을 투입했을 때 `preflight -> command registration -> adapter READY/interactions -> proof bundle`까지 한 번에 수집하는 실행면을 마련한다.
+- live Discord가 없어도 harness orchestration 자산 자체가 정상 동작하는지 local fake adapter로 검증한다.
+
+### Setup
+- Live proof runner: [ops/run_discord_gateway_live_proof.mjs](/Users/mymac/my%20dev/remodex/ops/run_discord_gateway_live_proof.mjs)
+- Probe script: [scripts/probe_discord_gateway_live_proof_assets.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_live_proof_assets.mjs)
+- Summary output: [verification/discord_gateway_live_proof_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_live_proof_assets_probe_summary.json)
+
+### Result
+- Status: PASS
+- harness는 preflight, command registration, adapter 기동, READY/interactions 감지, proof bundle 기록까지 정상 수행했다.
+- fake adapter가 먼저 종료되는 경우에도 bundle을 남기고 종료되도록 race를 수정했다.
+
+### Evidence
+- bundle:
+  - `register_commands = true`
+  - `expect_interaction = true`
+  - `proof.ready_seen = true`
+  - `proof.interaction_observed = true`
+  - `ok = true`
+- preflight in bundle:
+  - `next_step = ready_for_live_ingress_proof`
+- proof artifacts:
+  - `live-proof-bundle.json`
+  - `gateway-adapter.stdout.log`
+  - `gateway-adapter.stderr.log`
+  - `register-commands.stdout.log`
+  - `register-commands.stderr.log`
+
+### Observed Behaviors
+- 첫 구현에서는 adapter가 먼저 종료되면 `kill -> exit wait`에서 멈출 수 있었고, 이를 즉시 수정했다.
+- 이제 실제 Discord credentials만 넣으면 proof session을 반복 가능하게 실행하고 bundle을 남길 수 있다.
+
+### Strategy Impact
+- `11.3.2`는 더 이상 “자격증명만 있으면 수동으로 뭔가 해봐야 하는 상태”가 아니다.
+- 남은 blocker는 live Discord credential과 실제 guild/operator 입력뿐이다.
+
+## 2026-03-28 - Probe 73: Discord live proof wrapper and runbook assets
+
+### Goal
+- 실제 자격증명 투입 직전, shell/PowerShell wrapper와 runbook이 live proof runner와 같은 계약을 가리키는지 확인한다.
+- 운영자가 `preflight -> proof runner -> live-proof-bundle` 순서를 문서와 wrapper만 보고 그대로 수행할 수 있는지 검증한다.
+
+### Setup
+- Shell wrapper: [ops/run_discord_gateway_live_proof.sh](/Users/mymac/my%20dev/remodex/ops/run_discord_gateway_live_proof.sh)
+- PowerShell wrapper: [ops/run_discord_gateway_live_proof.ps1](/Users/mymac/my%20dev/remodex/ops/run_discord_gateway_live_proof.ps1)
+- Runbook: [DISCORD_LIVE_PROOF_RUNBOOK.md](/Users/mymac/my%20dev/remodex/DISCORD_LIVE_PROOF_RUNBOOK.md)
+- Probe script: [scripts/probe_discord_live_proof_wrapper_assets.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_live_proof_wrapper_assets.mjs)
+- Summary output: [verification/discord_live_proof_wrapper_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_live_proof_wrapper_assets_probe_summary.json)
+
+### Result
+- Status: PASS
+- shell wrapper는 `proof_dir`, `expect_interaction`, `timeout` env를 모두 노출한다.
+- PowerShell wrapper도 같은 세트로 정렬됐다.
+- runbook은 preflight, proof runner, proof bundle, interaction-required mode를 모두 명시한다.
+
+### Evidence
+- shell wrapper:
+  - `REMODEX_DISCORD_LIVE_PROOF_DIR`
+  - `REMODEX_DISCORD_LIVE_PROOF_EXPECT_INTERACTION`
+  - `REMODEX_DISCORD_LIVE_PROOF_TIMEOUT_MS`
+- powershell wrapper:
+  - same env set
+- runbook:
+  - `check_discord_gateway_live_preflight.mjs`
+  - `run_discord_gateway_live_proof`
+  - `live-proof-bundle.json`
+  - `EXPECT_INTERACTION=true`
+
+### Observed Behaviors
+- 이제 live proof는 node entrypoint만 아는 사람의 작업이 아니라 shell/PowerShell wrapper와 runbook 기준으로 재현 가능한 운영 절차가 됐다.
+- 남은 건 실제 Discord 자격증명과 테스트 guild에서 command를 한 번 보내는 live external proof뿐이다.
+
+### Strategy Impact
+- `11.3.2`의 자산 준비도는 충분하다.
+- 다음 smallest batch는 변함없이 `real credential preflight -> live ingress proof`다.
+
+## 2026-03-28 - Probe 74: Discord Gateway adapter near-live integration
+
+### Goal
+- 실제 Discord credentials 없이도 `real adapter process -> fake Gateway -> fake callback API -> bridge runtime -> shared memory` 경로를 거의 끝까지 검증한다.
+- canonical ingress에서 남은 변수가 정말 `credentials + live Discord edge`뿐인지 확인한다.
+- status와 intent가 각각 `outbox status_response`와 `dispatch_queue defer`로 분기하는지 본다.
+
+### Setup
+- Probe script: [scripts/probe_discord_gateway_adapter_near_live.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_adapter_near_live.mjs)
+- Summary output: [verification/discord_gateway_adapter_near_live_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_adapter_near_live_probe_summary.json)
+- Adapter entry: [scripts/remodex_discord_gateway_adapter.mjs](/Users/mymac/my%20dev/remodex/scripts/remodex_discord_gateway_adapter.mjs)
+- Shared memory runtime: [scripts/lib/shared_memory_runtime.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/shared_memory_runtime.mjs)
+
+### Result
+- Status: PASS
+- real adapter process는 fake Gateway `READY` 이후 두 개 interaction을 소비했다.
+- callback transport는 두 interaction 모두 `POST callback`과 `PATCH @original`을 남겼다.
+- `status(project-alpha)`는 `status_response` outbox로 기록됐다.
+- `intent(project-alpha)`는 binding이 없는 상태에서 예상대로 `missing_binding -> dispatch_queue defer`로 기록됐다.
+
+### Evidence
+- `adapter_exit.code = 0`
+- `ready_state_seen = true`
+- `interaction_events_seen = 2`
+- `callback_post_count = 2`
+- `callback_patch_count = 2`
+- `outbox_count = 1`
+- `dispatch_queue_count = 1`
+- `quarantine_count = 0`
+- `callback_patch_contents[0] = project: project-alpha / status: idle`
+- `callback_patch_contents[1] = route: inbox / delivery: deferred`
+
+### Observed Behaviors
+- 이전 시도에서 `writeAtomicJson` temp path가 `pid + Date.now()`만으로 만들어져, 같은 밀리초에 상태 파일을 두 번 쓰면 temp filename collision이 날 수 있다는 실제 결함이 드러났다.
+- [scripts/lib/shared_memory_runtime.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/shared_memory_runtime.mjs) 에 `crypto.randomUUID()`를 붙여 temp path를 truly unique하게 만든 뒤 near-live probe가 PASS로 전환됐다.
+- 즉 이번 probe는 Discord ingress 근거를 늘린 것뿐 아니라 shared memory atomic write 안정성도 함께 높였다.
+
+### Strategy Impact
+- `11.3.2`에서 남은 미검증 변수는 더 줄었다.
+- 이제 credentials 없이도 canonical ingress의 local/runtime half는 실 adapter process 기준으로 증명됐다.
+- 남은 main blocker는 실제 Discord app 자격증명과 live guild/operator 입력을 넣어 external edge를 닫는 것이다.
+
+## 2026-03-28 - Probe 75: Discord Gateway bootstrap assets integration
+
+### Goal
+- canonical ingress인 Discord Gateway adapter가 production bootstrap/install 자산에서도 1급 서비스로 다뤄지는지 확인한다.
+- launchd와 Windows Task Scheduler 양쪽에서 optional gateway service artifact를 생성할 수 있는지 검증한다.
+- install/uninstall 스크립트와 bootstrap 문서가 같은 toggle 계약을 가리키는지 본다.
+
+### Setup
+- Probe script: [scripts/probe_discord_gateway_bootstrap_assets.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_bootstrap_assets.mjs)
+- Summary output: [verification/discord_gateway_bootstrap_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_bootstrap_assets_probe_summary.json)
+- Scheduler renderer: [ops/lib/scheduler_adapter.mjs](/Users/mymac/my%20dev/remodex/ops/lib/scheduler_adapter.mjs)
+
+### Result
+- Status: PASS
+- `REMODEX_ENABLE_DISCORD_GATEWAY_ADAPTER=true`일 때 launchd plist와 Windows task XML 모두 gateway adapter artifact를 생성했다.
+- install/uninstall 스크립트는 gateway service/task를 함께 다루도록 정렬됐다.
+- env/bootstrap 문서도 같은 toggle 계약을 설명한다.
+
+### Evidence
+- launchd artifact:
+  - `com.remodex.discord-gateway-adapter.plist`
+- windows artifact:
+  - `Remodex-DiscordGatewayAdapter.xml`
+- checks:
+  - `install_launchd_mentions_gateway = true`
+  - `uninstall_launchd_mentions_gateway = true`
+  - `install_windows_mentions_gateway = true`
+  - `uninstall_windows_mentions_gateway = true`
+  - `env_mentions_toggle = true`
+  - `production_bootstrap_mentions_toggle = true`
+  - `windows_bootstrap_mentions_toggle = true`
+
+### Observed Behaviors
+- canonical ingress를 상시 운영하려면 gateway adapter도 bridge/scheduler와 같은 수준의 supervised service로 다뤄야 한다는 설계가 bootstrap 자산까지 일관되게 내려왔다.
+- default는 `false`로 두어, credentials 없이 bootstrap하는 환경에선 기존 동작을 깨지 않게 유지했다.
+
+### Strategy Impact
+- live proof 이후 production 전환 경로가 더 짧아졌다.
+- `11.3.2` 이후 남는 작업은 gateway adapter를 포함한 실제 OS-level 등록과 live Discord edge 증명으로 더 명확해졌다.
+
+## 2026-03-28 - Probe 76: dashboard gateway observability
+
+### Goal
+- dashboard read model과 UI가 canonical ingress인 Discord Gateway adapter 상태를 직접 보여줄 수 있는지 확인한다.
+- 운영자가 portfolio/detail/timeline만 보고 `gateway ready`, `last interaction`, `delivery decision`을 파악할 수 있게 한다.
+
+### Setup
+- Probe script: [scripts/probe_dashboard_gateway_observability.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_dashboard_gateway_observability.mjs)
+- Summary output: [verification/dashboard_gateway_observability_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/dashboard_gateway_observability_probe_summary.json)
+- Read model: [scripts/lib/dashboard_read_model.mjs](/Users/mymac/my%20dev/remodex/scripts/lib/dashboard_read_model.mjs)
+- Server/UI: [scripts/remodex_dashboard_server.mjs](/Users/mymac/my%20dev/remodex/scripts/remodex_dashboard_server.mjs)
+
+### Result
+- Status: PASS
+- portfolio는 workspace-level `gateway_adapter` 요약을 노출했다.
+- project detail은 `gateway last_event_type`, `last_project_interaction`을 노출했다.
+- timeline은 `gateway_adapter_state`, `gateway_interaction` 항목을 포함했다.
+
+### Evidence
+- `portfolio_gateway.ready_seen = true`
+- `portfolio_gateway.last_event_type = interaction_create`
+- `detail_gateway.last_project_interaction.command_class = status`
+- `timeline_kinds` includes:
+  - `gateway_adapter_state`
+  - `gateway_interaction`
+
+### Observed Behaviors
+- gateway ingress가 canonical path가 된 이상, operator는 bridge/scheduler만이 아니라 gateway adapter session 상태도 함께 봐야 실제 원인 분리가 빨라진다.
+- 이번 probe로 dashboard는 더 이상 project 내부 상태만 보는 화면이 아니라, ingress health까지 포함한 운영 상황판이 됐다.
+
+### Strategy Impact
+- `EP-950`는 live external proof가 남아 있어도, ingress 관측면은 이제 충분한 수준으로 정리됐다.
+- 실제 live proof 때 운영자가 볼 우선 truth가 더 명확해졌다.
+
+## 2026-03-28 - Probe 77: Discord live proof finalizer
+
+### Goal
+- live credential proof 실행 뒤 사람이 로그를 수작업으로 해석하지 않아도 되도록 canonical pass/fail 수집기를 만든다.
+- `live-proof-bundle.json`과 router truth를 함께 읽어 `live-proof-final-summary.json` 하나로 최종 판정을 내릴 수 있는지 확인한다.
+- wrapper가 `run -> finalize` 순서를 자동으로 따르도록 정렬한다.
+
+### Setup
+- Finalizer: [ops/finalize_discord_gateway_live_proof.mjs](/Users/mymac/my%20dev/remodex/ops/finalize_discord_gateway_live_proof.mjs)
+- Probe script: [scripts/probe_finalize_discord_gateway_live_proof.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_finalize_discord_gateway_live_proof.mjs)
+- Summary output: [verification/discord_gateway_live_proof_finalizer_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_live_proof_finalizer_probe_summary.json)
+
+### Result
+- Status: PASS
+- pass fixture에서는 `ready_seen`, `interaction_create`, `status_response outbox`를 읽어 `ok = true` final summary를 생성했다.
+- fail fixture에서는 `interaction_not_observed`, `live_proof_bundle_not_ok`를 blocker로 올려 `ok = false`를 반환했다.
+- shell/PowerShell wrapper는 이제 runner 뒤에 finalizer를 자동 실행한다.
+
+### Evidence
+- `pass_case.ok = true`
+- `pass_case.interaction_events_since_start = 1`
+- `pass_case.outbox_records_since_start = 1`
+- `fail_case.ok = false`
+- `fail_case.blockers` includes:
+  - `live_proof_bundle_not_ok`
+  - `interaction_not_observed`
+
+### Observed Behaviors
+- live proof는 `bundle`만으로 충분하지 않고, router outbox/quarantine/gateway event truth까지 같이 봐야 원인 분리가 빠르다.
+- canonical pass/fail 기준을 summary 파일 하나로 고정해두면 실제 credential run에서 `11.3.2`를 훨씬 짧게 닫을 수 있다.
+
+### Strategy Impact
+- 남은 blocker는 더 순수해졌다. 이제 필요한 건 실제 Discord 자격증명과 live interaction뿐이다.
+- live proof 실행면도 `preflight -> run -> final summary`로 고정됐다.
+
+## 2026-03-28 - Probe 78: dashboard bootstrap assets integration
+
+### Goal
+- dashboard server를 운영 bootstrap 자산에 1급 supervised service/task로 편입한다.
+- launchd와 Windows Task Scheduler 양쪽에서 optional dashboard artifact를 생성할 수 있는지 확인한다.
+- install/uninstall 스크립트와 bootstrap 문서가 같은 toggle 계약을 가리키는지 검증한다.
+
+### Setup
+- Probe script: [scripts/probe_dashboard_bootstrap_assets.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_dashboard_bootstrap_assets.mjs)
+- Summary output: [verification/dashboard_bootstrap_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/dashboard_bootstrap_assets_probe_summary.json)
+- Scheduler renderer: [ops/lib/scheduler_adapter.mjs](/Users/mymac/my%20dev/remodex/ops/lib/scheduler_adapter.mjs)
+
+### Result
+- Status: PASS
+- `REMODEX_ENABLE_DASHBOARD_SERVER=true`일 때 launchd plist와 Windows task XML 모두 dashboard artifact를 생성했다.
+- install/uninstall 스크립트는 dashboard service/task를 함께 다루도록 정렬됐다.
+- env/bootstrap 문서도 같은 toggle 계약을 설명한다.
+
+### Evidence
+- launchd artifact:
+  - `com.remodex.dashboard-server.plist`
+- windows artifact:
+  - `Remodex-DashboardServer.xml`
+- checks:
+  - `install_launchd_mentions_dashboard = true`
+  - `uninstall_launchd_mentions_dashboard = true`
+  - `install_windows_mentions_dashboard = true`
+  - `uninstall_windows_mentions_dashboard = true`
+  - `env_mentions_toggle = true`
+  - `production_bootstrap_mentions_toggle = true`
+  - `windows_bootstrap_mentions_toggle = true`
+
+### Observed Behaviors
+- dashboard는 read-only 관측면이지만 운영자가 실제로 쓰려면 bridge/scheduler/gateway와 같은 수준의 supervised 자산으로 다뤄야 한다.
+- default는 `false`로 두어, headless나 minimal bootstrap 환경에선 기존 동작을 깨지 않게 유지했다.
+
+### Strategy Impact
+- README에 남아 있던 `dashboard bootstrap asset integration` 공백을 제거했다.
+- 남은 운영 반영 배치는 live Discord proof와 실제 OS-level 등록 쪽으로 더 선명해졌다.
+
+## 2026-03-29 - Probe 79: live Discord preflight, registration, and gateway READY
+
+### Goal
+- 실제 Discord 자격증명을 넣은 상태에서 canonical ingress의 external edge가 어디까지 live로 성립하는지 확인한다.
+- 최소한 `preflight -> guild command registration -> gateway READY`까지는 live로 닫고, 남은 blocker가 operator interaction 1건뿐인지 분리한다.
+
+### Setup
+- Live runner: [ops/run_discord_gateway_live_proof.sh](/Users/mymac/my%20dev/remodex/ops/run_discord_gateway_live_proof.sh)
+- Bundle: [runtime/live-discord-proof/live-proof-bundle.json](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/live-proof-bundle.json)
+- Final summary: [runtime/live-discord-proof/live-proof-final-summary.json](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/live-proof-final-summary.json)
+- Command registration log: [runtime/live-discord-proof/register-commands.stdout.log](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/register-commands.stdout.log)
+- Adapter log: [runtime/live-discord-proof/gateway-adapter.stdout.log](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/gateway-adapter.stdout.log)
+
+### Result
+- Status: PARTIAL PASS
+- live preflight는 `ok = true`였다.
+- guild command registration은 실제 Discord API에 `completed`로 성공했다.
+- gateway session은 실제 Discord Gateway에 붙어 `ready_seen = true`를 기록했다.
+- 최종 fail 원인은 `interaction_not_observed` 하나였다.
+
+### Evidence
+- `preflight.ok = true`
+- `register_commands_result = completed`
+- `register-commands.stdout.log.scope = guild`
+- `register-commands.stdout.log.response_count = 4`
+- `bundle.proof.ready_seen = true`
+- `final_summary.blockers` includes:
+  - `live_proof_bundle_not_ok`
+  - `interaction_not_observed`
+
+### Observed Behaviors
+- 실제 Discord API/Gateway 연결 자체는 성립한다.
+- 이 시점의 남은 blocker는 네트워크, 토큰, guild registration이 아니라 live test guild에서 slash command가 들어오지 않은 것이다.
+
+### Strategy Impact
+- `11.3.2`의 남은 next smallest batch는 더 이상 preflight가 아니다.
+- 이제 필요한 건 test guild에서 `/status project:project-alpha` 같은 operator slash command 1건을 실제로 발생시키는 것이다.
+
+## 2026-03-29 - Probe 80: end-to-end Discord live ingress proof
+
+### Goal
+- 실제 Discord guild 채널에서 slash command를 실행해 canonical Gateway ingress가 end-to-end로 닫히는지 확인한다.
+- `preflight -> guild command registration -> gateway READY -> INTERACTION_CREATE -> outbox status response -> final summary ok=true`까지 한 경로로 증명한다.
+- `11.3.2`를 더 이상 “자격증명은 맞지만 operator interaction이 없다” 상태로 남기지 않는다.
+
+### Setup
+- Live runner: [ops/run_discord_gateway_live_proof.sh](/Users/mymac/my%20dev/remodex/ops/run_discord_gateway_live_proof.sh)
+- Final summary: [runtime/live-discord-proof/live-proof-final-summary.json](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/live-proof-final-summary.json)
+- Bundle: [runtime/live-discord-proof/live-proof-bundle.json](/Users/mymac/my%20dev/remodex/runtime/live-discord-proof/live-proof-bundle.json)
+- Summary output: [verification/discord_gateway_live_ingress_proof_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_live_ingress_proof_summary.json)
+- Shared-memory evidence:
+  - [runtime/external-shared-memory/remodex/router/discord_gateway_events.jsonl](/Users/mymac/my%20dev/remodex/runtime/external-shared-memory/remodex/router/discord_gateway_events.jsonl)
+  - [runtime/external-shared-memory/remodex/router/outbox/2026-03-29T01-10-46.077Z_status_response_1487619995595968753.json](/Users/mymac/my%20dev/remodex/runtime/external-shared-memory/remodex/router/outbox/2026-03-29T01-10-46.077Z_status_response_1487619995595968753.json)
+
+### Result
+- Status: PASS
+- 실제 guild 채널에서 `Remodex Pilot`의 `/status project:project-alpha` slash command가 실행됐다.
+- Gateway adapter는 real Discord Gateway session에서 `INTERACTION_CREATE`를 관찰했다.
+- bridge/runtime은 `status_response` outbox record를 남겼고, Discord 응답도 실제로 표시됐다.
+- canonical final summary는 `ok = true`로 끝났고, `next_step = discord_live_ingress_proof_verified`를 반환했다.
+
+### Evidence
+- `final_summary.ok = true`
+- `bundle.ok = true`
+- `bundle.proof.ready_seen = true`
+- `bundle.proof.interaction_observed = true`
+- `bundle.proof.timed_out = false`
+- `final_summary.counters.interaction_events_since_start = 1`
+- `final_summary.counters.outbox_records_since_start = 1`
+- `final_summary.counters.quarantine_records_since_start = 0`
+- `recent_interactions[0].command_class = status`
+- `recent_interactions[0].project_key = project-alpha`
+- `recent_outbox[0].type = status_response`
+
+### Observed Behaviors
+- 실제 interaction은 DM plain text가 아니라 guild 채널의 app slash command로 실행돼야 한다.
+- `status` command 경로는 same-thread delivery 없이도 shared-memory snapshot과 outbox response만으로 완결될 수 있다.
+- `no_ready_or_resumed_event_since_start` warning은 final summary의 pass를 막지 않았다. READY는 bundle에서 이미 확인했고, proof window 내 event slicing 문제일 뿐 blocker는 아니었다.
+
+### Strategy Impact
+- `11.3.2 end-to-end Discord live ingress proof`는 완료다.
+- `EP-950 Discord Gateway Ingress`도 이제 설계/구현/실제 외부 경계 증거까지 모두 확보했다.
+- 남은 건 ingress 설계가 아니라 OS-level 운영 반영과 Windows 실제 실행 증거 수집이다.
+
+## 2026-03-29 - Probe 84: Discord component UX
+
+### Goal
+- Discord operator가 slash command 뒤에 버튼/선택형 UX를 이어서 쓸 수 있는지 검증한다.
+- `/projects`가 select menu를 포함하는지, project 선택 후 status/bind/intent 버튼이 나타나는지, `작업 지시` 버튼이 modal을 열고 modal submit이 intent 경로로 이어지는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_component_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_component_ux.mjs)
+- Summary output: [verification/discord_component_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_component_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- `/projects` 응답은 project select menu를 포함했다.
+- project 선택 후 같은 카드 안에 `상태 보기`, `이 채널에 고정`, `작업 지시` 버튼이 나타났다.
+- `상태 보기`는 status summary를 component update로 돌려줬다.
+- `이 채널에 고정`은 guild/channel binding을 남겼다.
+- `작업 지시`는 modal을 열었고, modal submit은 intent inbox/dispatch 경로로 이어졌다.
+
+### Evidence
+- `projects_patch.components[0].components[0].custom_id = projects:select`
+- `select_update.data.components[1].components[*].custom_id`에 `projects:status:project-alpha`, `projects:bind:project-alpha`, `projects:intent:project-alpha`가 포함됨
+- `status_update.data.content`에 `project: project-alpha`
+- `intent_modal.type = 9`
+- `intent_modal.data.custom_id = projects:intent_modal:project-alpha`
+- `modal_ack.type = 5`
+- `inbox_record.command_name = projects-intent-modal-submit`
+- `dispatch_record.project_key = project-alpha`
+
+### Observed Behaviors
+- component interaction은 gateway 경로를 그대로 쓰되, callback type은 `UPDATE_MESSAGE`와 `MODAL`로 갈라진다.
+- modal submit은 별도 interaction으로 들어오고, slash command와 같은 defer/edit 경로를 재사용해도 shared-memory contract를 유지할 수 있다.
+- component UX를 붙여도 기존 `reply`/`approve-candidate` command mapping probe는 회귀하지 않았다.
+
+### Strategy Impact
+- Discord operator UX는 텍스트 명령만 있는 상태를 벗어나 `select -> button -> modal` interaction lane까지 확보했다.
+- 사용자는 이제 프로젝트 선택과 기본적인 상태 조회/채널 고정/작업 지시를 더 적은 기억 부담으로 수행할 수 있다.
+
+## 2026-03-29 - Probe 85: Discord live command refresh
+
+### Goal
+- 새 operator UX command set이 실제 테스트 guild에도 반영되는지 확인한다.
+- `/projects`, `/use-project`를 포함한 갱신된 slash command manifest를 live guild에 다시 등록한다.
+
+### Setup
+- Registration runner: [ops/register_discord_commands.mjs](/Users/mymac/my%20dev/remodex/ops/register_discord_commands.mjs)
+- Summary output: [verification/discord_live_command_refresh_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_live_command_refresh_probe_summary.json)
+
+### Result
+- Status: PASS
+- 실제 guild scope endpoint에 command set 6개를 다시 등록했다.
+- live guild command set에는 `/projects`, `/status`, `/use-project`, `/intent`, `/reply`, `/approve-candidate`가 포함된다.
+
+### Evidence
+- `endpoint = https://discord.com/api/v10/applications/1487429226209742961/guilds/700849185053737042/commands`
+- `command_count = 6`
+- `response_count = 6`
+- `commands[0] = projects`
+- `commands[2] = use-project`
+
+### Strategy Impact
+- component UX는 코드/문서/probe뿐 아니라 실제 Discord guild command set까지 반영됐다.
+- operator는 이제 live guild에서 `/projects`와 `/use-project`를 바로 사용할 수 있다.
+
+## 2026-03-29 - Probe 81: macOS host launchd bootstrap
+
+### Goal
+- 문서와 asset 수준에 머물던 macOS launchd bootstrap을 실제 호스트 등록까지 올린다.
+- bridge daemon, scheduler tick, Discord Gateway adapter가 launchd 아래에서 함께 올라오는지 확인한다.
+- canonical Gateway 운영에 필요한 실제 host-side 제약도 같이 분리한다.
+
+### Setup
+- Install helper: [ops/install_launchd_services.sh](/Users/mymac/my%20dev/remodex/ops/install_launchd_services.sh)
+- Env: [ops/remodex.env](/Users/mymac/my%20dev/remodex/ops/remodex.env)
+- Summary output: [verification/launchd_host_bootstrap_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/launchd_host_bootstrap_probe_summary.json)
+- Health evidence:
+  - [bridge health](http://127.0.0.1:8787/health)
+  - [discord_gateway_adapter_state.json](/Users/mymac/my%20dev/remodex/runtime/external-shared-memory/remodex/router/discord_gateway_adapter_state.json)
+
+### Result
+- Status: PASS
+- 실제 host에서 `com.remodex.bridge-daemon`, `com.remodex.scheduler-tick`, `com.remodex.discord-gateway-adapter`를 launchd로 bootstrap했다.
+- bridge `/health`는 `ok = true`, `ws_connected = true`를 반환했다.
+- Gateway adapter state는 `READY`, `ready_seen = true`, `is_stopped = false`로 유지됐다.
+
+### Evidence
+- launchd labels:
+  - `com.remodex.bridge-daemon`
+  - `com.remodex.scheduler-tick`
+  - `com.remodex.discord-gateway-adapter`
+- `bridge_health.ok = true`
+- `bridge_health.ws_connected = true`
+- `gateway_state.event_type = READY`
+- `gateway_state.ready_seen = true`
+- `gateway_state.snapshot.is_stopped = false`
+
+### Observed Behaviors
+- macOS `launchd`에서는 `PATH`를 기대하면 안 된다. `REMODEX_NODE_BIN`은 절대경로여야 안전하다.
+- canonical Gateway-only runtime에서는 `REMODEX_DISCORD_PUBLIC_KEY_PATH` placeholder가 남아 있으면 bridge daemon이 불필요하게 죽는다. 이 값은 webhook fallback을 실제로 쓸 때만 채워야 한다.
+- stderr 로그는 이전 실패가 남아 있을 수 있으므로 현재 판정은 launchd label state + bridge health + gateway state로 해야 한다.
+
+### Strategy Impact
+- 남아 있던 `실운영 launchd 등록` 배치도 실제 host 증거로 닫혔다.
+- 현재 남은 운영 반영 배치는 Windows 실제 실행 증거 수집이다.
+
+## 2026-03-29 - Probe 82: Discord project selection UX
+
+### Goal
+- Discord operator가 내부 `project_key`를 외우지 않아도 프로젝트를 찾고 지정할 수 있는지 검증한다.
+- `/projects`, project 자동완성, `/use-project`, channel binding 기반 project 생략, single-project default가 함께 동작하는지 본다.
+- 다중 프로젝트 + 미바인딩 상태에서 추측 라우팅 대신 안내 응답으로 끝나는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_project_selection_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_project_selection_ux.mjs)
+- Summary output: [verification/discord_project_selection_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_project_selection_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- `/projects`는 `project-alpha`, `project-beta`와 현재 힌트를 돌려줬다.
+- project autocomplete는 `alp` 입력에 `project-alpha` choice를 돌려줬다.
+- `/use-project project:alpha`는 alias를 `project-alpha`로 해석해 guild/channel binding을 남겼다.
+- binding 이후 `/status`, `/intent`는 `project` 생략 상태에서도 `channel_binding`으로 해석됐다.
+- single-project workspace에서는 별도 binding 없이 `/status`가 `single_project_default`로 해석됐다.
+
+### Evidence
+- `autocomplete.choices[0].value = project-alpha`
+- `projects.route = projects`
+- `missing_project.route = project_required`
+- `channel_binding.binding_record.project_key = project-alpha`
+- `bound_status.project_resolution.resolved_via = channel_binding`
+- `bound_intent.project_resolution.resolved_via = channel_binding`
+- `bound_intent.dispatch_record.blocked_reasons[0] = background_trigger_disabled`
+- `single_project_default.project_resolution.resolved_via = single_project_default`
+
+### Observed Behaviors
+- 다중 프로젝트에서 `project`가 비어 있고 channel binding이 없으면 quarantine이 아니라 `project_required` 안내로 끝나는 게 맞다.
+- `/use-project`는 explicit key뿐 아니라 alias도 받아야 실제 operator UX가 버틴다.
+- `intent`의 실제 delivery decision은 project resolution과 별개이므로, UX probe에서는 binding/route correctness와 delivery gate 이유를 분리해서 봐야 한다.
+
+### Strategy Impact
+- Discord operator UX는 이제 `project-key를 외워야 하는 미완성 상태`가 아니다.
+- canonical Gateway ingress 위에 `catalog -> autocomplete -> channel binding -> implicit resolution` 레인을 정식으로 올릴 수 있다.
+
+## 2026-03-29 - Probe 83: Discord command registration assets refresh
+
+### Goal
+- Discord slash command manifest가 새 operator UX 계약과 정확히 일치하는지 확인한다.
+- `/projects`, `/use-project`, optional `project`, autocomplete, required `source_ref`가 등록 자산에 반영되는지 검증한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_command_registration_assets.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_command_registration_assets.mjs)
+- Summary output: [verification/discord_command_registration_assets_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_command_registration_assets_probe_summary.json)
+
+### Result
+- Status: PASS
+- manifest command set은 `projects,status,use-project,intent,reply,approve-candidate`였다.
+- `status.project`는 optional + autocomplete였다.
+- `use-project.project`는 autocomplete enabled였다.
+- `reply.source_ref`, `approve-candidate.source_ref`는 계속 required였다.
+
+### Evidence
+- `command_names = projects,status,use-project,intent,reply,approve-candidate`
+- `status_project_optional = true`
+- `status_project_autocomplete = true`
+- `use_project_autocomplete = true`
+- `reply_source_ref_required = true`
+- `approval_source_ref_required = true`
+
+### Strategy Impact
+- live guild slash command 등록 자산도 새 UX와 같은 계약을 가리킨다.
+- operator-facing command set과 runtime resolution logic 사이의 drift가 제거됐다.
+
+## 2026-03-29 - Probe 86: Discord attach existing thread UX
+
+### Goal
+- shared memory 등록 프로젝트가 비어 있어도 Discord operator가 기존 Codex 메인 thread를 찾아 붙일 수 있는지 검증한다.
+- `/projects`가 existing thread attach 후보를 보여주고, 선택 시 `project_identity/coordinator_binding/channel binding`을 생성하는지 본다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_attach_existing_thread_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_attach_existing_thread_ux.mjs)
+- Summary output: [verification/discord_attach_existing_thread_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_attach_existing_thread_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- empty shared memory 상태에서도 `/projects`는 attach 가능한 existing Codex thread를 보여줬다.
+- unmaterialized loaded thread와 probe/automation 잡음을 제외한 뒤, 실제 의미 있는 기존 thread `Codex 데스크톱 IPC 활용법 찾기`만 attach 후보로 남겼다.
+- attach 선택 후 `project-codex-ipc` project key가 생성됐고, `project_identity`, `coordinator_binding`, channel binding이 함께 기록됐다.
+
+### Evidence
+- `projects.projects_count = 0`
+- `projects.attachable_threads_count = 1`
+- `attach.thread_id = 019d1dfb-74b5-7ee2-9d88-0339b3d08b92`
+- `attach.route = thread_attached`
+- `attach.project_key = project-codex-ipc`
+- `attached_binding.current_thread_ref = 019d1dfb-74b5-7ee2-9d88-0339b3d08b92`
+
+### Observed Behaviors
+- 첫 진입 bootstrap에서 `create-project`만 두면 기존 Codex 메인 thread를 가진 사용자 요구를 못 맞춘다.
+- canonical first step은 `existing Codex thread discovery -> attach`이고, `create-project`는 attach 후보가 없을 때만 fallback이어야 한다.
+- loaded thread 중 첫 user message도 없는 unmaterialized thread는 attach 후보에서 빼야 한다.
+- attach 후보 라벨은 `thread id`만 보여주면 안 되고, `저장된 thread 이름 + 최근 프롬프트 힌트 + 최근 시각`이 같이 보여야 사람이 고를 수 있다.
+
+### Strategy Impact
+- `/projects`는 더 이상 shared memory-only catalog가 아니다.
+- Discord operator는 기존 Codex 메인 thread를 먼저 attach하고, 그 뒤 ordinary project UX를 그대로 이어갈 수 있다.
+
+## 2026-03-29 - Probe 87: Discord live attach rollout refresh
+
+### Goal
+- attach existing thread UX가 실제 테스트 guild와 live Gateway adapter에 반영됐는지 확인한다.
+- slash command 재등록과 adapter 재시작 이후 `/projects`가 새 attach 경로를 서비스할 준비가 됐는지 본다.
+
+### Setup
+- Registration runner: [ops/register_discord_commands.mjs](/Users/mymac/my%20dev/remodex/ops/register_discord_commands.mjs)
+- Live adapter label: `com.remodex.discord-gateway-adapter`
+- Health evidence:
+  - [bridge health](http://127.0.0.1:8787/health)
+  - [discord_gateway_adapter_state.json](/Users/mymac/my%20dev/remodex/runtime/external-shared-memory/remodex/router/discord_gateway_adapter_state.json)
+
+### Result
+- Status: PASS
+- 실제 guild scope command set을 다시 등록했고 command count는 7개였다.
+- live Gateway adapter를 재시작한 뒤 `READY`, `ready_seen = true`, `ws_connected = true`를 확인했다.
+
+### Evidence
+- `endpoint = https://discord.com/api/v10/applications/1487429226209742961/guilds/700849185053737042/commands`
+- `command_count = 7`
+- `response_count = 7`
+- `bridge_health.ok = true`
+- `bridge_health.ws_connected = true`
+- `gateway_state.event_type = READY`
+
+### Strategy Impact
+- attach existing thread UX가 코드 수준이 아니라 live guild/operator surface까지 반영됐다.
+- `/projects`는 이제 기존 Codex thread attach bootstrap을 실사용 경로로 제공할 준비가 됐다.
+
+## 2026-03-29 - Probe 88: Discord attach control expansion
+
+### Goal
+- existing thread attach를 숨은 heuristic 하나로 강제하지 않고, operator가 `추천 보기`, `전체 보기`, `직접 연결`, `/attach-thread` 중 하나를 고를 수 있는지 검증한다.
+- `/projects` 추천 카드, `전체 보기` 버튼, `직접 연결` modal, slash direct attach가 모두 같은 attach bootstrap으로 이어지는지 본다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_attach_existing_thread_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_attach_existing_thread_ux.mjs)
+- Summary output: [verification/discord_attach_existing_thread_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_attach_existing_thread_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- 기본 `/projects`는 `attach_scope: recommended`와 함께 추천 attach 후보를 보여줬다.
+- `전체 보기` 버튼은 `attach_scope: all`로 전환됐고 attach 후보 수가 추천 모드보다 넓게 노출됐다.
+- `직접 연결` 버튼은 `projects:attach_manual_modal`을 열었고, 동일 thread id를 modal submit과 `/attach-thread` command 양쪽으로 연결해도 `thread_attached_existing`로 안전하게 처리됐다.
+- `attach-thread.thread_id` autocomplete는 canonical thread id를 돌려줬고, slash direct attach는 short id 8자리 prefix만으로도 canonical thread id로 해석됐다.
+
+### Evidence
+- `projects.attach_scope = recommended`
+- `projects.patch_body.components[1].components[0].custom_id = projects:attach_scope_all`
+- `all_scope.attach_scope = all`
+- `all_scope.attachable_threads = 25`
+- `manual_modal.custom_id = projects:attach_manual_modal`
+- `attach_autocomplete.first_choice_value = 019d1dfb-74b5-7ee2-9d88-0339b3d08b92`
+- `manual_attach.route = thread_attached_existing`
+- `slash_attach.route = thread_attached_existing`
+
+### Strategy Impact
+- attach 후보 필터는 이제 추천 보기일 뿐이며, 유일한 canonical 선택면이 아니다.
+- operator는 추천 후보에 동의하지 않으면 전체 보기로 넓혀 보거나, thread id를 직접 넣어 attach할 수 있다.
+
+## 2026-03-29 - Probe 89: Live Discord command refresh after attach control expansion
+
+### Goal
+- live guild command set이 attach control 확장과 같은 계약을 실제 Discord surface에 반영했는지 확인한다.
+
+### Setup
+- Registration runner: [ops/register_discord_commands.mjs](/Users/mymac/my%20dev/remodex/ops/register_discord_commands.mjs)
+- Summary output: [verification/discord_live_command_refresh_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_live_command_refresh_probe_summary.json)
+- Runtime state:
+  - [discord_gateway_adapter_state.json](/Users/mymac/my%20dev/remodex/runtime/external-shared-memory/remodex/router/discord_gateway_adapter_state.json)
+
+### Result
+- Status: PASS
+- live guild command count는 `8`이고 `/create-project`, `/attach-thread`가 같이 반영됐다.
+- gateway adapter 재기동 후 `READY`, `ws_connected = true`를 유지했다.
+
+### Evidence
+- `command_count = 8`
+- `response_count = 8`
+- `commands = projects,create-project,attach-thread,status,use-project,intent,reply,approve-candidate`
+- `gateway_state.event_type = READY`
+
+### Strategy Impact
+- attach control 확장이 local probe에만 머물지 않고, 실제 live Discord guild command surface까지 반영됐다.
+
+## 2026-03-29 - Probe 90: Cross-workspace attachable thread visibility
+
+### Goal
+- `/projects`의 `전체 보기`가 사람이 식별 불가능한 raw loaded thread dump가 아니라, 저장소 이름과 최근 힌트가 붙은 식별 가능한 existing Codex thread만 보여주는지 검증한다.
+- 다른 저장소의 existing Codex thread도 실제로 attach할 수 있는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_attach_existing_thread_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_attach_existing_thread_ux.mjs)
+- Summary output: [verification/discord_attach_existing_thread_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_attach_existing_thread_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- `추천 보기`는 현재 저장소의 의미 있는 attach 후보만 유지했다.
+- `다른 저장소 포함 전체 보기`는 `최종 조율자 스레드 [019cea08] — datarwin-phase1-baseline ...` 같은 cross-workspace attach 후보를 실제로 노출했다.
+- cross-workspace short id `019cea08`로 `/attach-thread`를 실행했을 때 `thread_attached`가 성공했고, 현재 runtime에 `project_identity + coordinator_binding + channel binding`이 생성됐다.
+
+### Evidence
+- `projects.attachable_threads[0].workspace_label = remodex (현재 저장소)`
+- `all_scope.attach_scope = all`
+- `all_scope.first_choices[1].display_name = 최종 조율자 스레드`
+- `all_scope.first_choices[1].workspace_label = datarwin-phase1-baseline`
+- `cross_workspace_attach.route = thread_attached`
+- `cross_workspace_attach.thread_id = 019cea08-0a5e-7193-98ad-4c13164bc7ec`
+
+### Strategy Impact
+- `전체 보기`는 더 이상 same-workspace empty loaded thread를 그대로 쏟아내는 디버그 목록이 아니다.
+- operator는 현재 저장소 밖의 existing Codex 메인 thread도 Discord에서 식별하고 attach할 수 있다.
+
+## 2026-03-29 - Probe 91: Cross-workspace attach status projection
+
+### Goal
+- 다른 저장소의 existing Codex thread를 attach한 직후, 같은 Discord 채널의 `/status`가 bootstrap placeholder가 아니라 실제 attached thread 메타데이터를 사용자용 문장으로 보여주는지 검증한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_attach_existing_thread_ux.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_attach_existing_thread_ux.mjs)
+- Summary output: [verification/discord_attach_existing_thread_ux_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_attach_existing_thread_ux_probe_summary.json)
+
+### Result
+- Status: PASS
+- `최종 조율자 스레드 [019cea08]`를 cross-workspace attach한 뒤 같은 채널에서 `/status`를 실행했을 때,
+  - `display`
+  - `thread`
+  - `workspace`
+  - 실제 attached thread 상태
+  - 최근 힌트
+  - 사용자 행동 중심 next 문구
+  가 포함된 응답이 나왔다.
+- attach bootstrap placeholder인 `main coordinator state refresh`는 더 이상 사용자 응답에 노출되지 않았다.
+
+### Evidence
+- `cross_workspace_status.route = status`
+- `cross_workspace_status.operator_message` contains `display: 최종 조율자 스레드`
+- `cross_workspace_status.operator_message` contains `thread: 019cea08`
+- `cross_workspace_status.operator_message` contains `workspace: datarwin-phase1-baseline`
+- `cross_workspace_status.operator_message` contains `status: 저장됨(notLoaded)`
+- `cross_workspace_status.operator_message` contains `next: 이 채널에서 작업 지시를 보내면 기존 메인 스레드가 다시 활성화됩니다.`
+
+### Strategy Impact
+- attach 이후 `/status`는 내부 project key나 bootstrap placeholder를 던지는 half-state가 아니라, attached existing thread를 기준으로 상태를 다시 설명해야 한다.
+- cross-workspace attach UX는 attach 자체뿐 아니라 상태 조회 surface까지 사용자 기준으로 읽히게 맞춰야 한다.

@@ -147,7 +147,72 @@ export class BridgeRuntime {
   }
 
   async statusSummary() {
-    return summarizeSnapshot(this.paths, await this.snapshot());
+    const snapshot = await this.snapshot();
+    const summary = summarizeSnapshot(this.paths, snapshot);
+    return await this.enrichStatusSummary(summary, snapshot);
+  }
+
+  async enrichStatusSummary(summary, snapshot) {
+    const sourceKind = snapshot.project_identity?.source_kind ?? null;
+    const displayName = snapshot.project_identity?.display_name ?? null;
+    if (displayName) {
+      summary.project_display_name = displayName;
+    }
+
+    const attachedThreadId =
+      snapshot.project_identity?.attached_thread_id ??
+      normalizeThreadId(snapshot) ??
+      null;
+    if (!attachedThreadId) {
+      return summary;
+    }
+
+    summary.attached_thread_id = attachedThreadId;
+    summary.attached_thread_short_id = String(attachedThreadId).slice(0, 8);
+
+    const attachedCwd = snapshot.project_identity?.cwd ?? null;
+    if (attachedCwd) {
+      summary.attached_workspace_cwd = attachedCwd;
+      summary.attached_workspace_label = path.basename(attachedCwd) || attachedCwd;
+    }
+
+    const client = await this.connectClientIfNeeded().catch(() => null);
+    if (!client) {
+      return summary;
+    }
+
+    const threadRead = await client.request("thread/read", {
+      threadId: attachedThreadId,
+      includeTurns: false,
+    }).catch(() => null);
+    const thread = threadRead?.thread ?? null;
+    if (!thread) {
+      return summary;
+    }
+
+    summary.attached_thread_status = thread.status?.type ?? thread.status ?? null;
+    summary.attached_thread_source = thread.source ?? null;
+    summary.attached_thread_name = String(thread.name ?? "").trim() || null;
+    summary.attached_thread_hint = summarizeThreadPreviewHint(thread.preview);
+    summary.attached_workspace_cwd = thread.cwd ?? summary.attached_workspace_cwd ?? null;
+    summary.attached_workspace_label =
+      path.basename(thread.cwd ?? "") || summary.attached_workspace_label || null;
+
+    if (sourceKind === "codex_thread_attach") {
+      summary.coordinator_status = summary.attached_thread_status ?? summary.coordinator_status;
+      if (
+        isBootstrapNextBatch(summary.next_smallest_batch) &&
+        (summary.inbox_count ?? 0) === 0 &&
+        (summary.dispatch_queue_count ?? 0) === 0
+      ) {
+        summary.next_smallest_batch =
+          summary.attached_thread_status === "notLoaded"
+            ? "이 채널에서 작업 지시를 보내면 기존 메인 스레드가 다시 활성화됩니다."
+            : "기존 메인 스레드 상태를 동기화하는 중입니다.";
+      }
+    }
+
+    return summary;
   }
 
   async readInFlight() {
@@ -713,4 +778,16 @@ function normalizeInflightTurnId(inflight) {
 
 function inflightTerminal(turn) {
   return Boolean(turn?.status) && turn.status !== "inProgress";
+}
+
+function summarizeThreadPreviewHint(preview) {
+  const text = String(preview ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const firstSentence = text.split(/[\n.!?]/).find((line) => line.trim()) ?? text;
+  return firstSentence.length <= 72 ? firstSentence : `${firstSentence.slice(0, 71).trimEnd()}…`;
+}
+
+function isBootstrapNextBatch(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "main coordinator state refresh";
 }

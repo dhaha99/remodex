@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { BridgeRuntime } from "./lib/bridge_runtime.mjs";
 import {
   buildProjectPaths,
@@ -8,7 +9,8 @@ import {
   writeAtomicJson,
 } from "./lib/shared_memory_runtime.mjs";
 
-const workspace = process.env.REMODEX_WORKSPACE ?? "/Users/mymac/my dev/remodex";
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const workspace = process.env.REMODEX_WORKSPACE ?? path.resolve(scriptDir, "..");
 const sharedBase = process.env.REMODEX_SHARED_BASE ?? path.join(workspace, "runtime", "external-shared-memory");
 const workspaceKey = process.env.REMODEX_WORKSPACE_KEY ?? "remodex";
 const wsUrl = process.env.CODEX_APP_SERVER_WS_URL ?? process.env.REMODEX_APP_SERVER_WS_URL ?? null;

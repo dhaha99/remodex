@@ -120,6 +120,86 @@
 | 8.1.2 | `completed` | `EP-710` | plist renderer and install helpers | [Scheduler Runtime Schema](./STRATEGY.md#scheduler-runtime-schema) |
 | 8.1.3 | `completed` | `EP-710` | production bootstrap document | [References](./STRATEGY.md#references) |
 
+### 9.0 Dashboard Observability
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 9.1 | `completed` | `EP-810` | dashboard MVP specification | [Observability Dashboard Rule](./STRATEGY.md#observability-dashboard-rule) |
+| 9.1.1 | `completed` | `EP-810` | read-only dashboard boundary | [State Ownership](./STRATEGY.md#state-ownership) |
+| 9.1.2 | `completed` | `EP-810` | portfolio/project/timeline data contract | [Multi-Project Namespace Rule](./STRATEGY.md#multi-project-namespace-rule) |
+| 9.1.3 | `completed` | `EP-810` | human gate / incident view definition | [Human Gate](./STRATEGY.md#human-gate) |
+| 9.2 | `completed` | `EP-820` | dashboard read model and UI | [Observability Dashboard Rule](./STRATEGY.md#observability-dashboard-rule) |
+| 9.2.1 | `completed` | `EP-820` | portfolio overview aggregator | [Main Situational Awareness Rule](./STRATEGY.md#main-situational-awareness-rule) |
+| 9.2.2 | `completed` | `EP-820` | project detail and timeline normalizer | [Restart Recovery](./STRATEGY.md#restart-recovery) |
+| 9.2.3 | `completed` | `EP-820` | human gate / incident panel | [Go / No-Go](./STRATEGY.md#go--no-go) |
+
+### 10.0 Portability And Resource Safety
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 10.1 | `completed` | `EP-910` | Windows 포팅 점검표 | [Platform Portability Rule](./STRATEGY.md#platform-portability-rule) |
+| 10.1.1 | `completed` | `EP-910` | macOS-specific hard dependency inventory | [Execution Modes](./STRATEGY.md#execution-modes) |
+| 10.1.2 | `completed` | `EP-910` | Windows Go / No-Go and porting order | [Go / No-Go](./STRATEGY.md#go--no-go) |
+| 10.2 | `completed` | `EP-920` | macOS 24h soak 계획 | [Resource Safety Rule](./STRATEGY.md#resource-safety-rule) |
+| 10.2.1 | `completed` | `EP-920` | soak 단계 / 시나리오 / 지표 정의 | [Validation](./STRATEGY.md#validation) |
+| 10.2.2 | `completed` | `EP-920` | acceptance threshold / hard failure 정의 | [Failure Signals](./STRATEGY.md#failure-signals) |
+| 10.3 | `completed` | `EP-930` | Windows runtime adapter | [Platform Portability Rule](./STRATEGY.md#platform-portability-rule) |
+| 10.3.1 | `completed` | `EP-930` | scheduler adapter abstraction | [Autonomous Trigger Loop Rule](./STRATEGY.md#autonomous-trigger-loop-rule) |
+| 10.3.2 | `completed` | `EP-930` | PowerShell wrapper / bootstrap | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 10.4 | `completed` | `EP-940` | macOS soak 실행 | [Resource Safety Rule](./STRATEGY.md#resource-safety-rule) |
+| 10.4.1 | `completed` | `EP-940` | 30min smoke | [Validation](./STRATEGY.md#validation) |
+| 10.4.2 | `completed` | `EP-940` | 6h churn + 24h overnight | [Go / No-Go](./STRATEGY.md#go--no-go) |
+
+### 11.0 Discord Gateway Ingress
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 11.1 | `completed` | `EP-950` | Gateway adapter runtime | [Ingress Architecture Decision](./STRATEGY.md#ingress-architecture-decision) |
+| 11.1.1 | `completed` | `EP-950` | Discord Gateway session and event consumer | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 11.1.2 | `completed` | `EP-950` | interaction ack and follow-up response transport | [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule) |
+| 11.2 | `completed` | `EP-950` | Gateway normalization to shared memory | [Shared External Memory](./STRATEGY.md#2-shared-external-memory) |
+| 11.2.1 | `completed` | `EP-950` | status / intent / reply mapping | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 11.2.2 | `completed` | `EP-950` | approval candidate and ACL mapping | [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule) |
+| 11.3 | `completed` | `EP-950` | production ingress bootstrap and validation | [Ingress Architecture Decision](./STRATEGY.md#ingress-architecture-decision) |
+| 11.3.1 | `completed` | `EP-950` | no-public-raw-bridge exposure check | [Ingress Architecture Decision](./STRATEGY.md#ingress-architecture-decision) |
+| 11.3.2 | `completed` | `EP-950` | end-to-end Discord live ingress proof | [Validation](./STRATEGY.md#validation) |
+
+### 12.0 Discord Operator UX
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 12.1 | `completed` | `EP-960` | project catalog and autocomplete | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 12.1.1 | `completed` | `EP-960` | `/projects` catalog command | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 12.1.2 | `completed` | `EP-960` | `project` option autocomplete | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 12.2 | `completed` | `EP-960` | implicit project resolution UX | [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule) |
+| 12.2.1 | `completed` | `EP-960` | `/use-project` channel binding | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 12.2.2 | `completed` | `EP-960` | channel binding / single-project default / resolution help | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+
+### 13.0 Discord Component UX
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 13.1 | `completed` | `EP-970` | project picker components | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 13.1.1 | `completed` | `EP-970` | `/projects` select menu card | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 13.1.2 | `completed` | `EP-970` | project-selected action buttons | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 13.2 | `completed` | `EP-970` | modal-based intent capture | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 13.2.1 | `completed` | `EP-970` | `작업 지시` button -> modal open | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 13.2.2 | `completed` | `EP-970` | modal submit -> inbox/dispatch | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+
+### 14.0 Discord Existing Thread Attach UX
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 14.1 | `completed` | `EP-980` | existing Codex thread discovery | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 14.1.1 | `completed` | `EP-980` | app-server `thread/list` / `thread/read` attach catalog | [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule) |
+| 14.1.2 | `completed` | `EP-980` | `/projects` attachable thread select menu | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 14.1.3 | `completed` | `EP-980` | 추천 보기 / 전체 보기 / 직접 연결 attach control | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 14.2 | `completed` | `EP-980` | existing thread attach bootstrap | [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule) |
+| 14.2.1 | `completed` | `EP-980` | `project_identity/coordinator_binding` 생성 | [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule) |
+| 14.2.2 | `completed` | `EP-980` | attach 후 channel binding 및 ordinary operator flow 재사용 | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 14.2.3 | `completed` | `EP-980` | `/attach-thread` direct attach command | [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule) |
+| 14.2.4 | `completed` | `EP-980` | `attach-thread.thread_id` autocomplete + short-id prefix resolution | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+
 ## Rollup Rules
 
 - parent WBS는 child 중 하나라도 `in_progress`면 `in_progress`다.
@@ -130,9 +210,12 @@
 ## Current Active WBS
 
 - Active WBS: `none`
-- Active Plan Ref: `EP-610`
+- Active Plan Ref: `none`
 - Why active:
-  - 모든 leaf WBS가 완료됐다.
-  - 이후 작업은 새 전략 변경 또는 운영 중 incident에 의해 다시 열리는 배치만 남는다.
+  - `11.0`은 real Discord guild slash command까지 포함한 live ingress proof로 완료됐다.
+- `12.0`은 `/projects`, 자동완성, `/use-project`, implicit project resolution까지 포함해 operator UX를 정리했다.
+- `13.0`은 `/projects` 선택 카드, 상태/고정/작업 지시 버튼, modal submit까지 포함해 component UX를 정리했다.
+- `14.0`은 shared memory가 비어 있어도 existing Codex thread를 발견해 attach하는 첫 진입 경로를 정리했고, 추천 보기만 강제하지 않고 전체 보기/직접 연결까지 제공한다.
+  - canonical ingress는 이제 문서, 코드, bootstrap, local probe, live external edge 증거를 모두 갖췄다.
 - Next smallest batch:
-  - none
+  - `실제 launchd 등록 또는 Windows 실제 실행 증거 수집이 필요할 때 새 배치를 연다`

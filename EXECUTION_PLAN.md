@@ -10,6 +10,11 @@
 - 메인 읽기 계약: [MAIN_COORDINATOR_PROMPT_CONTRACT.md](./MAIN_COORDINATOR_PROMPT_CONTRACT.md)
 - 검증 근거: [verification/VERIFICATION_LOG.md](./verification/VERIFICATION_LOG.md)
 - 실행 분해 구조: [WBS.md](./WBS.md)
+- 대시보드 명세: [DASHBOARD_MVP.md](./DASHBOARD_MVP.md)
+- Windows 포팅 점검표: [WINDOWS_PORTABILITY_CHECKLIST.md](./WINDOWS_PORTABILITY_CHECKLIST.md)
+- Windows bootstrap: [WINDOWS_BOOTSTRAP.md](./WINDOWS_BOOTSTRAP.md)
+- macOS soak 계획: [MACOS_SOAK_TEST_PLAN.md](./MACOS_SOAK_TEST_PLAN.md)
+- Discord live proof runbook: [DISCORD_LIVE_PROOF_RUNBOOK.md](./DISCORD_LIVE_PROOF_RUNBOOK.md)
 
 ## Status Legend
 
@@ -30,13 +35,13 @@
 
 ## Current Snapshot
 
-- Strategy baseline: `Shared Working Memory Strategy v2`
-- Execution plan version: `2026-03-27`
-- Current phase: `Phase 7 - Production Bootstrap Assets`
+- Strategy baseline: `Shared Working Memory Strategy v3`
+- Execution plan version: `2026-03-29`
+- Current phase: `Phase 14 - Discord Existing Thread Attach UX complete`
 - Current active package: `none`
 - Current active WBS: `none`
 - Immediate next smallest batch:
-  - none
+  - `Windows 실제 실행 증거 수집 배치가 요청되면 시작`
 
 ## Phase Overview
 
@@ -50,6 +55,13 @@
 | P5 | human gate / recovery / same-thread continuation 구현 | `completed` |
 | P6 | hardening, soak, operator runbook 정리 | `completed` |
 | P7 | production bootstrap assets 정리 | `completed` |
+| P8 | dashboard observability MVP 명세 및 구현 준비 | `completed` |
+| P9 | 플랫폼 포팅 점검과 자원 안정성 계획 | `completed` |
+| P10 | Windows adapter 구현과 macOS soak 실행 | `completed` |
+| P11 | Discord Gateway ingress 정식 경계 구현 | `completed` |
+| P12 | Discord operator UX 개선 | `completed` |
+| P13 | Discord component UX 개선 | `completed` |
+| P14 | Discord existing-thread attach UX 개선 | `completed` |
 
 ## Work Packages
 
@@ -370,3 +382,302 @@
 - Exit criteria:
   - 운영자가 probe 파일이 아니라 실제 launchd asset으로 bridge/scheduler를 설치할 수 있음
   - env example, wrapper, plist renderer, bootstrap 문서가 서로 일치함
+
+### EP-810 Dashboard Observability MVP Spec
+
+- Status: `completed`
+- WBS refs: `9.1`
+- Strategy refs:
+  - [Observability Dashboard Rule](./STRATEGY.md#observability-dashboard-rule)
+  - [Multi-Project Namespace Rule](./STRATEGY.md#multi-project-namespace-rule)
+  - [Main Situational Awareness Rule](./STRATEGY.md#main-situational-awareness-rule)
+- Deliverables:
+  - [DASHBOARD_MVP.md](./DASHBOARD_MVP.md)
+  - strategy / README / execution traceability 반영
+- Exit criteria:
+  - 대시보드가 read-only observability layer라는 경계가 문서에 고정됨
+  - MVP 화면, 데이터 소스, refresh 모델, 비목표가 정의됨
+
+### EP-820 Dashboard Read Model And UI
+
+- Status: `completed`
+- WBS refs: `9.2`
+- Strategy refs:
+  - [Observability Dashboard Rule](./STRATEGY.md#observability-dashboard-rule)
+  - [Routing And Namespace Rule](./STRATEGY.md#routing-and-namespace-rule)
+  - [Scheduler Runtime Schema](./STRATEGY.md#scheduler-runtime-schema)
+- Deliverables:
+  - [scripts/lib/dashboard_read_model.mjs](./scripts/lib/dashboard_read_model.mjs)
+  - [scripts/remodex_dashboard_server.mjs](./scripts/remodex_dashboard_server.mjs)
+  - [DASHBOARD_MVP.md](./DASHBOARD_MVP.md)
+- Validation basis:
+  - [Probe 53](./verification/VERIFICATION_LOG.md#2026-03-27---probe-53-dashboard-read-model-portfolio--detail--timeline--human-gate--incident)
+  - [Probe 54](./verification/VERIFICATION_LOG.md#2026-03-27---probe-54-dashboard-http-root--json-endpoints)
+- Exit criteria:
+  - portfolio snapshot이 shared memory truth와 일치함
+  - human gate / blocked reason / last processed가 project별로 정확히 보임
+  - HTML root와 JSON endpoint가 read-only로 응답함
+
+### EP-910 Windows Portability Assessment
+
+- Status: `completed`
+- WBS refs: `10.1`
+- Strategy refs:
+  - [Platform Portability Rule](./STRATEGY.md#platform-portability-rule)
+  - [Execution Modes](./STRATEGY.md#execution-modes)
+  - [Go / No-Go](./STRATEGY.md#go--no-go)
+- Deliverables:
+  - [WINDOWS_PORTABILITY_CHECKLIST.md](./WINDOWS_PORTABILITY_CHECKLIST.md)
+  - README / strategy / execution traceability 반영
+- Exit criteria:
+  - 현재 구현이 왜 macOS-first인지와 Windows gap이 명확히 문서화됨
+  - portable core와 OS adapter 경계가 분리됨
+  - Windows pilot의 Go / No-Go가 정의됨
+
+### EP-920 macOS Resource Safety And Soak Plan
+
+- Status: `completed`
+- WBS refs: `10.2`
+- Strategy refs:
+  - [Resource Safety Rule](./STRATEGY.md#resource-safety-rule)
+  - [Validation](./STRATEGY.md#validation)
+  - [Failure Signals](./STRATEGY.md#failure-signals)
+- Deliverables:
+  - [MACOS_SOAK_TEST_PLAN.md](./MACOS_SOAK_TEST_PLAN.md)
+  - README / strategy / execution traceability 반영
+- Exit criteria:
+  - 30min / 6h / 24h soak 단계와 수집 지표가 정의됨
+  - hard failure 기준과 acceptance threshold가 문서화됨
+  - unattended 운영 전 요구 증거가 명확해짐
+
+### EP-930 Windows Runtime Adapter
+
+- Status: `completed`
+- WBS refs: `10.3`
+- Strategy refs:
+  - [Platform Portability Rule](./STRATEGY.md#platform-portability-rule)
+  - [Autonomous Trigger Loop Rule](./STRATEGY.md#autonomous-trigger-loop-rule)
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+- Validation basis:
+  - [Probe 55](./verification/VERIFICATION_LOG.md#2026-03-27---probe-55-scheduler-adapter-abstraction)
+  - [Probe 56](./verification/VERIFICATION_LOG.md#2026-03-27---probe-56-windows-bootstrap-assets-and-path-normalization)
+- Deliverables:
+  - Windows scheduler adapter
+  - PowerShell wrapper set
+  - path/env normalization
+  - Windows bootstrap document
+- Exit criteria:
+  - launchd 의존 없이 Windows에서 bridge/scheduler bootstrap 가능
+  - 핵심 런타임 entrypoint가 OS-agnostic path resolution을 사용
+- Progress evidence:
+  - [ops/lib/scheduler_adapter.mjs](./ops/lib/scheduler_adapter.mjs)
+  - [ops/render_scheduler_artifacts.mjs](./ops/render_scheduler_artifacts.mjs)
+  - launchd helper가 unsupported scheduler kind에서 fail-closed
+  - [ops/lib/RemodexEnv.ps1](./ops/lib/RemodexEnv.ps1)
+  - [ops/run_bridge_daemon.ps1](./ops/run_bridge_daemon.ps1)
+  - [ops/run_scheduler_tick.ps1](./ops/run_scheduler_tick.ps1)
+  - [ops/install_windows_scheduled_tasks.ps1](./ops/install_windows_scheduled_tasks.ps1)
+  - [ops/uninstall_windows_scheduled_tasks.ps1](./ops/uninstall_windows_scheduled_tasks.ps1)
+  - [WINDOWS_BOOTSTRAP.md](./WINDOWS_BOOTSTRAP.md)
+
+### EP-940 macOS Soak Execution
+
+- Status: `completed`
+- WBS refs: `10.4`
+- Strategy refs:
+  - [Resource Safety Rule](./STRATEGY.md#resource-safety-rule)
+  - [Validation](./STRATEGY.md#validation)
+  - [Go / No-Go](./STRATEGY.md#go--no-go)
+- Validation basis:
+  - [Probe 57](./verification/VERIFICATION_LOG.md#2026-03-27---probe-57-macos-smoke-bootstrap-and-metrics-collection)
+  - [Probe 58](./verification/VERIFICATION_LOG.md#2026-03-27---probe-58-macos-smoke-stack-assets-and-fixture-bootstrap)
+  - [Probe 59](./verification/VERIFICATION_LOG.md#2026-03-27---probe-59-1s-host-side-macos-smoke-stack)
+  - [Probe 60](./verification/VERIFICATION_LOG.md#2026-03-27---probe-60-30min-host-side-macos-smoke-stack)
+  - [Probe 61](./verification/VERIFICATION_LOG.md#2026-03-27---probe-61-short-host-side-macos-churn-stack)
+  - [Probe 62](./verification/VERIFICATION_LOG.md#2026-03-28---probe-62-6h-host-side-macos-churn-stack)
+  - [Probe 63](./verification/VERIFICATION_LOG.md#2026-03-28---probe-63-macos-churn-graceful-shutdown-drain)
+  - [Probe 64](./verification/VERIFICATION_LOG.md#2026-03-28---probe-64-24h-overnight-runtime-checkpoint)
+  - [Probe 70](./verification/VERIFICATION_LOG.md#2026-03-28---probe-70-24h-overnight-final-verdict-collection)
+- Deliverables:
+  - 30min smoke evidence
+  - 6h churn evidence
+  - graceful shutdown/drain evidence
+  - 24h overnight evidence
+  - soak summary verdict
+- Progress evidence:
+  - [MACOS_SOAK_TEST_PLAN.md](./MACOS_SOAK_TEST_PLAN.md)
+  - [ops/collect_macos_runtime_metrics.sh](./ops/collect_macos_runtime_metrics.sh)
+  - [ops/run_macos_smoke.sh](./ops/run_macos_smoke.sh)
+  - [ops/run_dashboard_server.sh](./ops/run_dashboard_server.sh)
+  - [ops/bootstrap_macos_smoke_fixture.mjs](./ops/bootstrap_macos_smoke_fixture.mjs)
+  - [ops/run_macos_smoke_stack.sh](./ops/run_macos_smoke_stack.sh)
+  - [ops/summarize_macos_smoke_stack.mjs](./ops/summarize_macos_smoke_stack.mjs)
+  - [ops/bootstrap_macos_churn_fixture.mjs](./ops/bootstrap_macos_churn_fixture.mjs)
+  - [ops/run_macos_churn_driver.mjs](./ops/run_macos_churn_driver.mjs)
+  - [ops/run_macos_churn_stack.sh](./ops/run_macos_churn_stack.sh)
+  - [ops/summarize_macos_churn_stack.mjs](./ops/summarize_macos_churn_stack.mjs)
+  - [ops/drain_macos_churn_shutdown.mjs](./ops/drain_macos_churn_shutdown.mjs)
+  - [ops/finalize_macos_churn_stack.mjs](./ops/finalize_macos_churn_stack.mjs)
+  - [verification/macos_24h_overnight_stack_summary.json](./verification/macos_24h_overnight_stack_summary.json)
+  - [verification/macos_24h_shutdown_drain_summary.json](./verification/macos_24h_shutdown_drain_summary.json)
+  - [verification/macos_24h_overnight_final_verdict_probe_summary.json](./verification/macos_24h_overnight_final_verdict_probe_summary.json)
+- Exit criteria:
+  - metrics artifact가 수집됨
+  - duplicate replay / orphan process / runaway growth가 없는지 판정됨
+  - 최종 청결성은 `shutdown_drain_summary.json`까지 포함해 판정됨
+
+### EP-950 Discord Gateway Ingress
+
+- Status: `completed`
+- WBS refs: `11.1`, `11.2`, `11.3`
+- Strategy refs:
+  - [Ingress Architecture Decision](./STRATEGY.md#ingress-architecture-decision)
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule)
+- Validation basis:
+  - Discord Gateway live ingress evidence
+  - interaction ack / follow-up response evidence
+  - no-public-raw-bridge exposure evidence
+  - [Probe 71](./verification/VERIFICATION_LOG.md#2026-03-28---probe-71-discord-gateway-live-preflight-assets)
+  - [Probe 72](./verification/VERIFICATION_LOG.md#2026-03-28---probe-72-discord-gateway-live-proof-harness-assets)
+  - [Probe 73](./verification/VERIFICATION_LOG.md#2026-03-28---probe-73-discord-live-proof-wrapper-and-runbook-assets)
+  - [Probe 74](./verification/VERIFICATION_LOG.md#2026-03-28---probe-74-discord-gateway-adapter-near-live-integration)
+  - [Probe 75](./verification/VERIFICATION_LOG.md#2026-03-28---probe-75-discord-gateway-bootstrap-assets-integration)
+  - [Probe 76](./verification/VERIFICATION_LOG.md#2026-03-28---probe-76-dashboard-gateway-observability)
+  - [Probe 77](./verification/VERIFICATION_LOG.md#2026-03-28---probe-77-discord-live-proof-finalizer)
+  - [Probe 79](./verification/VERIFICATION_LOG.md#2026-03-29---probe-79-live-discord-preflight-registration-and-gateway-ready)
+  - [Probe 80](./verification/VERIFICATION_LOG.md#2026-03-29---probe-80-end-to-end-discord-live-ingress-proof)
+- Progress evidence:
+  - [scripts/lib/discord_gateway_session.mjs](./scripts/lib/discord_gateway_session.mjs)
+  - [scripts/lib/discord_gateway_adapter_runtime.mjs](./scripts/lib/discord_gateway_adapter_runtime.mjs)
+  - [scripts/lib/discord_interaction_callback_transport.mjs](./scripts/lib/discord_interaction_callback_transport.mjs)
+  - [scripts/lib/discord_gateway_operator_responder.mjs](./scripts/lib/discord_gateway_operator_responder.mjs)
+  - [scripts/lib/shared_memory_runtime.mjs](./scripts/lib/shared_memory_runtime.mjs)
+  - [scripts/remodex_discord_gateway_adapter.mjs](./scripts/remodex_discord_gateway_adapter.mjs)
+  - [ops/lib/scheduler_adapter.mjs](./ops/lib/scheduler_adapter.mjs)
+  - [ops/run_discord_gateway_adapter.sh](./ops/run_discord_gateway_adapter.sh)
+  - [ops/run_discord_gateway_adapter.ps1](./ops/run_discord_gateway_adapter.ps1)
+  - [ops/install_launchd_services.sh](./ops/install_launchd_services.sh)
+  - [ops/uninstall_launchd_services.sh](./ops/uninstall_launchd_services.sh)
+  - [ops/install_windows_scheduled_tasks.ps1](./ops/install_windows_scheduled_tasks.ps1)
+  - [ops/uninstall_windows_scheduled_tasks.ps1](./ops/uninstall_windows_scheduled_tasks.ps1)
+  - [ops/check_discord_gateway_live_preflight.mjs](./ops/check_discord_gateway_live_preflight.mjs)
+  - [ops/run_discord_gateway_live_proof.mjs](./ops/run_discord_gateway_live_proof.mjs)
+  - [ops/finalize_discord_gateway_live_proof.mjs](./ops/finalize_discord_gateway_live_proof.mjs)
+  - [ops/run_discord_gateway_live_proof.sh](./ops/run_discord_gateway_live_proof.sh)
+  - [ops/run_discord_gateway_live_proof.ps1](./ops/run_discord_gateway_live_proof.ps1)
+  - [ops/register_discord_commands.mjs](./ops/register_discord_commands.mjs)
+  - [DISCORD_LIVE_PROOF_RUNBOOK.md](./DISCORD_LIVE_PROOF_RUNBOOK.md)
+  - [verification/discord_gateway_session_probe_summary.json](./verification/discord_gateway_session_probe_summary.json)
+  - [verification/discord_gateway_callback_transport_probe_summary.json](./verification/discord_gateway_callback_transport_probe_summary.json)
+  - [verification/discord_gateway_command_mapping_probe_summary.json](./verification/discord_gateway_command_mapping_probe_summary.json)
+  - [verification/no_public_raw_bridge_exposure_probe_summary.json](./verification/no_public_raw_bridge_exposure_probe_summary.json)
+  - [verification/discord_command_registration_assets_probe_summary.json](./verification/discord_command_registration_assets_probe_summary.json)
+  - [verification/discord_gateway_live_preflight_probe_summary.json](./verification/discord_gateway_live_preflight_probe_summary.json)
+  - [verification/discord_gateway_live_proof_assets_probe_summary.json](./verification/discord_gateway_live_proof_assets_probe_summary.json)
+  - [verification/discord_live_proof_wrapper_assets_probe_summary.json](./verification/discord_live_proof_wrapper_assets_probe_summary.json)
+  - [verification/discord_gateway_adapter_near_live_probe_summary.json](./verification/discord_gateway_adapter_near_live_probe_summary.json)
+  - [verification/discord_gateway_bootstrap_assets_probe_summary.json](./verification/discord_gateway_bootstrap_assets_probe_summary.json)
+  - [verification/dashboard_gateway_observability_probe_summary.json](./verification/dashboard_gateway_observability_probe_summary.json)
+  - [verification/discord_gateway_live_proof_finalizer_probe_summary.json](./verification/discord_gateway_live_proof_finalizer_probe_summary.json)
+- Deliverables:
+  - Discord Gateway adapter
+  - Gateway event normalization to shared memory
+  - operator reply / status / approval response transport
+  - production ingress bootstrap and runbook
+  - live proof final summary collector
+- Exit criteria:
+  - Discord가 public webhook 없이 로컬 노드와 안정적으로 왕복한다
+  - raw bridge daemon은 loopback-only 상태를 유지한다
+  - operator status / intent / reply / approval candidate가 Gateway 경로로 same-thread delivery까지 이어진다
+  - live Discord 자격증명으로 same path를 external edge까지 닫은 증거가 확보된다
+  - live guild slash command 1건이 final summary `ok = true`로 수집된다
+
+### EP-960 Discord Operator UX
+
+- Status: `completed`
+- WBS refs: `12.1`, `12.2`
+- Strategy refs:
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule)
+- Validation basis:
+  - [Probe 82](./verification/VERIFICATION_LOG.md#2026-03-29---probe-82-discord-project-selection-ux)
+  - [Probe 83](./verification/VERIFICATION_LOG.md#2026-03-29---probe-83-discord-command-registration-assets-refresh)
+- Progress evidence:
+  - [scripts/lib/discord_command_manifest.mjs](./scripts/lib/discord_command_manifest.mjs)
+  - [scripts/lib/discord_transport.mjs](./scripts/lib/discord_transport.mjs)
+  - [scripts/lib/discord_gateway_adapter_runtime.mjs](./scripts/lib/discord_gateway_adapter_runtime.mjs)
+  - [scripts/lib/discord_gateway_operator_responder.mjs](./scripts/lib/discord_gateway_operator_responder.mjs)
+  - [scripts/lib/discord_interaction_callback_transport.mjs](./scripts/lib/discord_interaction_callback_transport.mjs)
+  - [scripts/probe_discord_project_selection_ux.mjs](./scripts/probe_discord_project_selection_ux.mjs)
+  - [scripts/probe_discord_command_registration_assets.mjs](./scripts/probe_discord_command_registration_assets.mjs)
+  - [verification/discord_project_selection_ux_probe_summary.json](./verification/discord_project_selection_ux_probe_summary.json)
+  - [verification/discord_command_registration_assets_probe_summary.json](./verification/discord_command_registration_assets_probe_summary.json)
+- Deliverables:
+  - `/projects` project catalog command
+  - project option autocomplete
+  - `/use-project` channel default project binding
+  - project omission fallback via channel binding / single-project default
+  - `project_required` / `unknown_project` operator help path
+- Exit criteria:
+  - 사용자가 내부 `project_key`를 미리 외우지 않아도 `/projects`와 자동완성으로 프로젝트를 찾을 수 있다
+  - 채널 기본 프로젝트 바인딩 후 `/status`, `/intent`, `/reply`에서 `project` 생략이 가능하다
+  - 단일 프로젝트 workspace에서는 별도 binding 없이 `project`를 생략할 수 있다
+  - 다중 프로젝트 + 미바인딩 상태에서는 추측 라우팅 대신 안내 응답으로 끝난다
+
+### EP-970 Discord Component UX
+
+- Status: `completed`
+- WBS refs: `13.1`, `13.2`
+- Strategy refs:
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule)
+- Validation basis:
+  - [Probe 84](./verification/VERIFICATION_LOG.md#2026-03-29---probe-84-discord-component-ux)
+- Progress evidence:
+  - [scripts/lib/discord_gateway_adapter_runtime.mjs](./scripts/lib/discord_gateway_adapter_runtime.mjs)
+  - [scripts/lib/discord_gateway_operator_responder.mjs](./scripts/lib/discord_gateway_operator_responder.mjs)
+  - [scripts/lib/discord_interaction_callback_transport.mjs](./scripts/lib/discord_interaction_callback_transport.mjs)
+  - [scripts/probe_discord_component_ux.mjs](./scripts/probe_discord_component_ux.mjs)
+  - [verification/discord_component_ux_probe_summary.json](./verification/discord_component_ux_probe_summary.json)
+- Deliverables:
+  - `/projects` select menu card
+  - project-selected action buttons
+  - modal-based intent submission from button flow
+  - component interaction -> same bridge/shared-memory contract
+- Exit criteria:
+  - `/projects` 응답이 select menu를 포함한다
+  - 프로젝트 선택 후 status/bind/intent 버튼이 같은 카드에 나타난다
+  - `작업 지시` 버튼이 modal을 열고, modal submit이 intent inbox/dispatch 경로로 이어진다
+
+### EP-980 Discord Existing Thread Attach UX
+
+- Status: `completed`
+- WBS refs: `14.1`, `14.2`
+- Strategy refs:
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Project Identity And Routing Rule](./STRATEGY.md#project-identity-and-routing-rule)
+- Validation basis:
+  - [Probe 86](./verification/VERIFICATION_LOG.md#2026-03-29---probe-86-discord-attach-existing-thread-ux)
+  - [Probe 88](./verification/VERIFICATION_LOG.md#2026-03-29---probe-88-discord-attach-control-expansion)
+  - [Probe 89](./verification/VERIFICATION_LOG.md#2026-03-29---probe-89-live-discord-command-refresh-after-attach-control-expansion)
+- Progress evidence:
+  - [scripts/lib/app_server_jsonrpc.mjs](./scripts/lib/app_server_jsonrpc.mjs)
+  - [scripts/lib/discord_gateway_adapter_runtime.mjs](./scripts/lib/discord_gateway_adapter_runtime.mjs)
+  - [scripts/lib/discord_gateway_operator_responder.mjs](./scripts/lib/discord_gateway_operator_responder.mjs)
+  - [scripts/probe_discord_attach_existing_thread_ux.mjs](./scripts/probe_discord_attach_existing_thread_ux.mjs)
+  - [verification/discord_attach_existing_thread_ux_probe_summary.json](./verification/discord_attach_existing_thread_ux_probe_summary.json)
+  - [verification/discord_live_command_refresh_probe_summary.json](./verification/discord_live_command_refresh_probe_summary.json)
+- Deliverables:
+  - app-server existing thread discovery
+  - `/projects` attachable thread choices
+  - 추천 보기 / 전체 보기 / 직접 연결 attach control
+  - `/attach-thread` direct attach command
+  - `attach-thread.thread_id` autocomplete + short-id prefix resolution
+  - attach 선택 시 `project_identity/coordinator_binding/channel binding` 생성
+  - 기존 Codex 메인 thread를 Discord 채널에 연결하는 bootstrap path
+- Exit criteria:
+  - shared memory 등록 프로젝트가 없어도 `/projects`가 attach 가능한 existing Codex thread를 보여준다
+  - operator가 숨은 heuristic 하나에 묶이지 않고 추천 보기, 전체 보기, 직접 연결 중 하나를 고를 수 있다
+  - 사용자가 attach 후보를 고르면 새 프로젝트 생성 없이 기존 thread를 project-local namespace에 연결할 수 있다
+  - attach 완료 후 ordinary `/status`, `/intent`, `/reply` 흐름을 같은 project key로 계속 쓸 수 있다

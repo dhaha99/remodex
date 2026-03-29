@@ -6,12 +6,20 @@
 
 - `Codex app-server`
   - project 메인 thread를 실제로 이어서 실행하는 경계다.
+- `Discord Gateway adapter`
+  - canonical production Discord ingress다.
 - `bridge daemon`
-  - Discord/operator ingress, status 응답, human gate candidate 기록을 담당한다.
+  - internal bridge runtime, status 응답, human gate candidate 기록을 담당한다.
 - `scheduler tick`
   - background mode에서만 project를 깨우고 `dispatch_queue` 또는 `inbox`를 같은 thread에 이어 붙인다.
 - `shared memory`
   - project별 운영 truth다. 메인, bridge, scheduler 모두 이 파일들을 기준으로 판단한다.
+
+구분:
+
+- Discord 실운영 연결은 Gateway adapter가 담당한다.
+- bridge daemon의 HTTP는 loopback admin/probe surface다.
+- webhook relay는 fallback일 뿐 canonical path가 아니다.
 
 ## Authoritative Paths
 
@@ -33,14 +41,17 @@ workspace router 기준 핵심 경로:
 - `router/outbox/`
 - `router/quarantine/`
 - `router/pending_approvals.json`
+- `router/discord_gateway_adapter_state.json`
+- `router/discord_gateway_events.jsonl`
 
 ## Preflight
 
 1. `Codex app-server`가 살아 있는지 확인한다.
 2. bridge daemon `/health`가 `ok: true`인지 확인한다.
-3. project에 `coordinator_binding.json`이 있고 현재 thread binding이 맞는지 확인한다.
-4. foreground/background 모드가 현재 운영 의도와 일치하는지 확인한다.
-5. `must_human_check`, `human_gate_candidates`, `pending_approvals`가 남아 있지 않은지 확인한다.
+3. canonical ingress를 쓰는 경우 `router/discord_gateway_adapter_state.json`에서 `ready_seen`, `last_event_type`, `session_id`를 확인한다.
+4. project에 `coordinator_binding.json`이 있고 현재 thread binding이 맞는지 확인한다.
+5. foreground/background 모드가 현재 운영 의도와 일치하는지 확인한다.
+6. `must_human_check`, `human_gate_candidates`, `pending_approvals`가 남아 있지 않은지 확인한다.
 
 ## Foreground Mode
 
@@ -92,8 +103,13 @@ workspace router 기준 핵심 경로:
 
 ## Operator Actions
 
-bridge가 받는 operator class는 네 가지다.
+Gateway adapter가 정규화해 bridge로 넘기는 operator action은 여섯 가지다.
 
+- `projects`
+  - 사용 가능한 프로젝트 목록과 현재 힌트를 돌려주고, select menu를 함께 붙인다.
+  - shared memory 등록 프로젝트뿐 아니라, 아직 attach되지 않은 기존 Codex thread 후보도 같이 보여준다.
+- `use-project`
+  - 현재 guild/channel에 기본 프로젝트를 바인딩한다.
 - `status`
   - 현재 snapshot을 읽어 `router/outbox/status_response_*`로 응답한다.
 - `intent`
@@ -106,18 +122,36 @@ bridge가 받는 operator class는 네 가지다.
 규칙:
 
 - operator 입력은 direct injection이 아니라 반드시 shared memory로 들어간다.
+- 첫 진입에서 shared memory 프로젝트가 비어 있어도, `/projects`는 app-server의 기존 Codex thread를 attach 후보로 같이 보여줘야 한다.
+- 기존 Codex 메인 thread가 있으면 `새 프로젝트 등록`보다 `기존 Codex 스레드 연결`이 우선이다.
+- `project`는 명시적으로 줄 수도 있고, 채널 기본 프로젝트나 single-project default로 자동 결정될 수도 있다.
+- `/projects`에서 프로젝트를 고르면 같은 카드 안에서 `상태 보기`, `이 채널에 고정`, `작업 지시` 버튼을 이어서 쓸 수 있다.
+- `/projects`에서 attach 후보를 고르면 runtime은 `project_identity + coordinator_binding + channel binding`을 만들고, 그 뒤부터 ordinary project 카드와 같은 흐름으로 들어간다.
+- attach 후보 기준은 숨은 heuristic 하나로 강제하면 안 되고, 최소한 `추천 보기`, `다른 저장소 포함 전체 보기`, `직접 연결(thread id)` 세 경로를 operator가 직접 고를 수 있어야 한다.
+- `전체 보기`는 raw loaded thread를 그대로 뿌리면 안 되고, 저장소 이름과 최근 힌트가 붙은 식별 가능한 기존 Codex thread만 보여줘야 한다.
+- 다른 저장소의 기존 Codex 메인 thread도 attach 가능해야 하고, attach 후에는 `project_identity + coordinator_binding + channel binding`을 현재 runtime에 생성하는 편이 맞다.
+- `/attach-thread`는 자동완성을 지원하고, live alert에 보이는 short id 8자리 prefix도 unique하면 canonical thread id로 해석되는 편이 맞다.
+- `작업 지시` 버튼은 modal을 열고, 입력 텍스트는 `intent`와 같은 규약으로 shared memory에 기록된다.
+- 여러 프로젝트가 보이는데 `project`가 비어 있고 채널 기본 프로젝트도 없으면 quarantine이 아니라 `project_required` 안내로 응답해야 한다.
+- project 입력은 자동완성으로 고를 수 있어야 한다.
 - `status`는 즉답 가능하지만, 최신 판단이 필요하면 메인을 한 번 더 깨워 refresh해야 한다.
 - `approve-candidate`는 `ops-admin`만 허용한다.
-- project가 없거나 권한이 없으면 quarantine으로 빠져야 정상이다.
+- 권한이 없으면 quarantine으로 빠져야 정상이다.
+- project가 빠진 경우는 `project_required` 또는 `unknown_project` 안내로 먼저 돌려주고, 다중 프로젝트에서 추측 라우팅하면 안 된다.
 
 ## Status Checks
 
 일상 점검은 아래 순서가 안전하다.
 
 1. `/health`로 daemon과 app-server 연결 상태를 본다.
-2. `/projects/<project>/status` 또는 `status_response` outbox를 본다.
-3. `coordinator_status`, `background_trigger_toggle`, `pending_approvals`, `human_gate_candidates`를 같이 본다.
-4. `processed/`와 `processed_correlation_index.md`가 마지막 operator action과 일치하는지 본다.
+2. Discord에서 `/projects`로 프로젝트 목록과 attach 후보를 먼저 본다.
+3. attach 후보가 기대보다 적으면 `다른 저장소 포함 전체 보기`로 식별 가능한 기존 thread를 넓혀 본다.
+4. thread id를 이미 알고 있으면 `직접 연결` 또는 `/attach-thread thread_id:<...>`를 쓴다.
+5. 기존 Codex thread가 없을 때만 새 프로젝트 등록을 고려한다.
+6. dashboard 또는 router truth에서 `gateway_adapter_state`, `last_project_interaction`, `gateway_interaction` timeline을 본다.
+7. `/projects/<project>/status` 또는 `status_response` outbox를 본다.
+8. `coordinator_status`, `background_trigger_toggle`, `pending_approvals`, `human_gate_candidates`를 같이 본다.
+9. `processed/`와 `processed_correlation_index.md`가 마지막 operator action과 일치하는지 본다.
 
 정상 징후:
 

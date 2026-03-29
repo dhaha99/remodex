@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { JsonRpcWsClient } from "./lib/app_server_jsonrpc.mjs";
 import { BridgeRuntime } from "./lib/bridge_runtime.mjs";
 import {
@@ -22,7 +23,8 @@ import {
   verifyDiscordStyleRequest,
 } from "./lib/discord_transport.mjs";
 
-const workspace = process.env.REMODEX_WORKSPACE ?? "/Users/mymac/my dev/remodex";
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const workspace = process.env.REMODEX_WORKSPACE ?? path.resolve(scriptDir, "..");
 const sharedBase = process.env.REMODEX_SHARED_BASE ?? path.join(workspace, "runtime", "external-shared-memory");
 const workspaceKey = process.env.REMODEX_WORKSPACE_KEY ?? "remodex";
 const host = process.env.REMODEX_OPERATOR_HTTP_HOST ?? "127.0.0.1";

@@ -214,6 +214,21 @@ export class JsonRpcWsClient {
   }
 }
 
+export async function createInitializedWsClient(url, logPath, clientName) {
+  const client = new JsonRpcWsClient(url, logPath);
+  await client.connect();
+  await client.initialize(clientName);
+  return client;
+}
+
+export async function listStoredThreads(client, params = {}) {
+  return await client.request("thread/list", params);
+}
+
+export async function listLoadedThreads(client) {
+  return await client.request("thread/loaded/list", {});
+}
+
 export function extractTurnId(result) {
   return result?.turn?.id ?? result?.turnId ?? result?.id ?? null;
 }

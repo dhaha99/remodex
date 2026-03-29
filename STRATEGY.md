@@ -1,4 +1,4 @@
-# Shared Working Memory Strategy v2
+# Shared Working Memory Strategy v3
 
 ## Purpose
 
@@ -104,6 +104,109 @@
 - Discord는 같은 기준에서 공식 Codex surface라기보다 **커스텀 operator ingress**로 취급해야 한다.
 - 따라서 Discord를 쓰더라도 Codex 내부 foreground turn에 직접 주입하는 구조가 아니라, shared memory로 정규화하는 외부 브리지 구조로 설계해야 한다.
 
+## Ingress Architecture Decision
+
+이 전략의 **정식 Discord ingress 구조**는 아래 하나로 고정한다.
+
+- **Canonical production ingress = Discord Gateway adapter**
+
+이 결정은 취향 문제가 아니라, 현재 요구사항과 공식 제약을 동시에 만족하는 가장 깔끔한 경계이기 때문이다.
+
+### 왜 Gateway adapter인가
+
+- Discord 공식 문서 기준 interaction 수신 경로는 둘 중 하나다.
+  - Gateway connection
+  - HTTP outgoing webhooks
+- HTTP outgoing webhooks를 쓰려면 Discord가 도달 가능한 **공개 HTTPS endpoint**가 필요하다.
+- 반면 Gateway 방식은 로컬 프로세스가 Discord로 **아웃바운드 연결**을 만들기 때문에, 로컬 bridge를 인터넷에 직접 노출할 필요가 없다.
+- Remodex의 핵심 목표는 `로컬 Codex app-server를 안전하게 계속 쓰면서`, `Discord를 operator surface로 붙이는 것`이다.
+- 이 목표에는 공개 inbound webhook보다 **로컬 outbound Gateway adapter**가 더 잘 맞는다.
+
+### canonical topology
+
+```text
+Discord user
+-> Discord Gateway
+-> local Discord Gateway adapter
+-> internal bridge runtime
+-> shared memory
+-> foreground main / scheduler
+-> local Codex app-server
+-> Codex app thread
+```
+
+핵심 원칙:
+
+- Discord는 로컬 `Codex app-server`를 직접 치지 않는다.
+- Discord는 로컬 `bridge daemon`의 loopback HTTP를 직접 치지 않는다.
+- Discord와 로컬 노드 사이의 네트워크 경계는 **Gateway adapter**가 담당한다.
+- Remodex 내부 truth는 여전히 shared memory와 app-server/thread state다.
+
+### internal bridge HTTP의 지위
+
+현재 저장소의 `bridge daemon` HTTP 서버는 아래 용도로만 본다.
+
+- loopback health
+- local probe
+- internal admin route
+- optional local relay intake
+
+즉 현재의 `/discord/interactions` 경로는 **production Discord edge가 아니다**.
+
+- `127.0.0.1`에 바인딩된 internal endpoint일 뿐이다.
+- 실운영 Discord ingress 완성 근거로 계산하면 안 된다.
+- Discord-style signed payload probe를 production Discord ingress 검증으로 간주하면 안 된다.
+
+### webhook relay는 언제 쓰나
+
+Webhook relay는 **차선책**이다.
+
+적합한 경우:
+
+- Gateway adapter를 당장 만들 수 없고
+- 공개 HTTPS ingress를 단기적으로 붙여야 하며
+- 운영자가 별도 relay/tunnel을 감당할 수 있을 때
+
+하지만 webhook relay를 canonical path로 두면 안 된다.
+
+이유:
+
+- public HTTPS endpoint가 필요하다
+- Discord `PING/PONG`, 3초 ACK, follow-up/edit original response 계약을 맞춰야 한다
+- raw localhost bridge를 공개 edge로 쓰면 안 되고, 별도 Discord facade가 필요하다
+- tunnel / reverse proxy / cert / public exposure 관리가 추가된다
+
+### Tailscale의 역할
+
+Tailscale은 이 전략에서 **사람용 접근면**이지, Discord ingress 수단이 아니다.
+
+- `Tailscale Serve`
+  - tailnet 내부 사람/기기에서 dashboard나 내부 UI를 여는 용도
+- `Tailscale Funnel`
+  - public internet에 노출해야 하는 webhook relay의 보조 수단일 뿐
+  - canonical Discord ingress가 아니다
+
+금지:
+
+- Discord가 tailnet 내부 IP:port를 직접 볼 수 있다고 가정
+- `tailscale serve`만으로 Discord webhook ingress가 된다고 가정
+- raw bridge daemon을 Funnel 뒤에 그대로 노출
+
+### production ingress score gate
+
+아래가 닫히기 전에는 이 전략을 `98+` 완성 전략으로 평가하면 안 된다.
+
+- Gateway adapter 책임 경계 정의
+- Discord command/message surface와 shared memory contract 연결
+- Discord 응답 방식
+  - immediate ack
+  - deferred response
+  - follow-up / status push
+- operator identity / ACL / replay 방어
+- foreground/background/main/human-gate와의 충돌 없는 arbitration
+
+즉, **production Discord ingress 결정이 비어 있던 이전 문서는 고득점 완성 전략이 아니었다.**
+
 ## Core Principles
 
 ### 1. Single Active Brain
@@ -152,10 +255,15 @@
 ## Architecture
 
 ```text
-mobile / Discord / external / cron
--> global ingress
+Discord user
+-> Discord Gateway
+-> local Discord Gateway adapter
 -> router / resolver
 -> (workspace_key, project_key) namespace
+
+mobile browser / operator UI
+-> Tailscale Serve or local-only dashboard access
+-> read-only dashboard / admin surface
 
 local/isolate workers
 -> project-local inbox/*.md                 # append-only batch events
@@ -231,6 +339,28 @@ project foreground main coordinator
 
 - 여러 project를 사람이 한 화면에서 보고 싶다면 별도 portfolio dashboard를 둘 수 있다.
 - 하지만 portfolio view는 라우팅/관찰용일 뿐, project lease를 대체하지 못한다.
+
+## Observability Dashboard Rule
+
+운영 이력을 사람이 빠르게 읽어야 하는 시점부터는 별도 대시보드를 둘 수 있다.
+
+원칙:
+
+- 대시보드는 `관측면`이지 `제어면`이 아니다.
+- 대시보드는 `state/*`, `runtime/*`, `processed/*`, `router/outbox/*`, `router/pending_approvals.json`을 읽기만 해야 한다.
+- 대시보드는 project별 현재 상태와 portfolio 수준의 운영 이력을 한 화면에서 보여줄 수 있다.
+- 대시보드는 coordinator lease, approval closure, worker 지시, background trigger 변경을 직접 수행하면 안 된다.
+- 대시보드는 별도 truth나 독자적인 상태 DB를 만들면 안 된다.
+
+필수 화면:
+
+- portfolio overview
+- project detail
+- timeline/history
+- human gate view
+- incident quick view
+
+자세한 MVP 범위는 [DASHBOARD_MVP.md](./DASHBOARD_MVP.md)를 따른다.
 
 ## Mandatory Placement Rule
 
@@ -1435,7 +1565,20 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 
 - Slash command / interaction 기반 ingress
 - webhook 또는 interaction endpoint로 수신
+- canonical production path는 **Gateway adapter**
+- webhook / interaction endpoint는 fallback relay로만 허용
+- internal bridge HTTP는 loopback-only admin/probe surface로 유지
 - command payload에 명시적 `project` 인자를 두거나, channel/thread map으로 project를 결정
+- operator UX는 최소한 `/projects`, `project` 자동완성, `/use-project` 채널 기본 프로젝트 바인딩을 제공하는 편이 맞다
+- operator UX는 slash command만 두지 말고, 가능하면 message components 기반 `project select -> status/bind/intent buttons -> modal` 흐름을 제공하는 편이 좋다
+- `/projects`는 shared memory 등록 프로젝트만 보여주면 안 되고, existing Codex thread 중 아직 binding되지 않은 attach 후보도 같이 보여줘야 한다
+- `추천 보기`는 현재 저장소 중심으로 좁혀도 되지만, `전체 보기`는 다른 저장소의 식별 가능한 existing Codex thread까지 포함하는 편이 맞다
+- attach 후보는 숨은 단일 heuristic만 강제하지 말고, 최소한 `추천 보기`, `다른 저장소 포함 전체 보기`, `thread id 직접 연결` 세 경로를 operator가 선택할 수 있게 하는 편이 맞다
+- `전체 보기`는 raw loaded thread dump가 아니라, 저장소 이름과 최근 힌트가 붙은 식별 가능한 thread만 노출해야 한다
+- direct attach 경로는 full UUID만 강제하지 말고, 자동완성과 unique short-id prefix 해석을 제공하는 편이 맞다
+- 기존 Codex 메인 thread가 존재하면 canonical first step은 `create-project`가 아니라 `attach existing thread -> project_identity/coordinator_binding 생성`이어야 한다
+- `project`는 explicit 입력, alias match, channel binding, single-project default 순으로 해석하고, 다중 프로젝트에서 추측 라우팅하면 안 된다
+- `project`가 비어 있고 channel binding도 없으며 단일 프로젝트도 아니면 quarantine이 아니라 `project_required` 안내 응답으로 먼저 되돌려야 한다
 - command payload를 `workspace_key`, `project_key`, `source`, `type`, `urgency`, `request`, `constraints`, `dedupe_key`를 갖는 inbox event로 변환
 - operator-facing ingress는 빠르게 `accepted`를 돌려주고, 실제 delivery는 inbox/dispatch 경로에서 이어가는 비동기 ack 모델을 권장한다
 - 즉 `interaction accepted`와 `same-thread delivery completed`는 다른 상태로 취급해야 한다
@@ -1447,11 +1590,15 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 - 일반 채팅 내용 무차별 스크레이핑
 - Discord 메시지를 그대로 메인 프롬프트로 전달
 - Discord 대화 로그를 `state/*` 대체물로 사용
+- raw localhost bridge를 Discord production endpoint로 직접 등록
+- tailnet 내부 IP를 Discord endpoint로 설정
+- `tailscale serve`를 Discord ingress 해결책으로 오인
 
 이유:
 
 - Discord slash command는 명령 의도가 명확하고 구조화하기 쉽다.
-- interaction/webhook 모델은 브리지 서버와 맞물리기 쉽다.
+- Gateway model은 공개 inbound edge 없이 로컬 app-server 중심 구조와 더 잘 맞는다.
+- interaction/webhook 모델은 fallback relay로는 유효하지만, canonical ingress로 두면 public edge 운영 부담이 커진다.
 - free-form chat scrape는 direct injection에 가까워져 중복, 오해, drift를 키운다.
 
 ### Discord Identity And Authorization Rule
@@ -1816,7 +1963,7 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 
 이 모드는 `Discord를 사람 입력 표면`, `cron을 누락 방지 리컨실러`로 쓰는 운영 모드다.
 
-- Discord는 command/interaction 기반 operator ingress를 담당
+- Discord는 canonical path 기준으로 **Gateway adapter 기반 operator ingress**를 담당
 - bridge는 Discord 입력을 project-resolved structured inbox event로 정규화
 - cron은 ingestion 누락, deferred 재검토, stale artifact, heartbeat anomaly만 감시
 - 메인 foreground는 다음 checkpoint에서만 읽고 판단
@@ -1893,6 +2040,26 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - stop condition이 정의돼 있지 않다
 - destructive/release 작업을 야간에 자동 진행시키고 싶다
 
+## Platform Portability Rule
+
+- portable core는 `app-server + shared memory + bridge + scheduler truth`다.
+- OS별 차이는 scheduler install, shell wrapper, path resolution, bootstrap asset에서만 다뤄야 한다.
+- 현재 canonical bootstrap은 macOS-first이며 `launchd`, `zsh`, Homebrew Node path는 Windows canonical contract가 아니다.
+- Windows 운영 지원을 주장하려면 Windows-native bootstrap과 Windows probe evidence가 필요하다.
+- macOS probe를 Windows readiness 근거로 재사용하면 안 된다.
+- absolute macOS path는 기본 계약이 아니라 임시 기본값일 뿐이며, 최종 운영 배치는 env/config 기반 path resolution을 사용해야 한다.
+- 한 OS의 bootstrap이 다른 OS의 runtime truth를 오염시키면 실패다.
+
+## Resource Safety Rule
+
+- Remodex-owned long-lived process는 bridge daemon과 optional dashboard뿐이다.
+- scheduler tick은 short-lived process여야 하며 주기 실행 후 종료돼야 한다.
+- bridge와 dashboard는 loopback bind만 허용한다.
+- dashboard는 observability view일 뿐이며 truth를 수정하면 안 된다.
+- unattended 운영을 넓히기 전에는 target OS 기준 soak evidence가 필요하다.
+- soak verdict 없이 “장시간 안정”을 주장하면 안 된다.
+- 자원 안정성 평가는 RSS, CPU, orphan process, listen port, log/disk growth, duplicate replay, human gate safety를 함께 봐야 한다.
+
 ## Validation
 
 ### Success Criteria
@@ -1913,6 +2080,8 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - background trigger toggle이 꺼져 있거나 foreground session active면 cron wake가 차단된다.
 - scheduler service가 실제로 설치/활성 상태가 아니면 toggle ON만으로는 밤샘 루프가 생기지 않는다.
 - scheduler는 lightweight precheck만 수행하고, strategy/roadmap/evidence deep read는 메인이 수행한다.
+- target OS별 bootstrap이 분리돼 있고, 다른 OS 계약을 침범하지 않는다.
+- 장시간 unattended 운영 전에는 target OS 기준 soak evidence가 존재한다.
 - worker 구현 산출물이 artifact 경로로 제출되고 foreground review를 거쳐 반영된다.
 - cloud delegated 결과도 local ingestion 뒤에만 운영 truth가 되며, 복구 가능하다.
 - 동일 요청 중복 실행률이 사실상 0에 가깝다.
@@ -1981,6 +2150,8 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - Discord approval 요청이 signature verification이나 ACL 없이 inbox로 승격된다.
 - cron follow-up event가 `source_ref` 또는 `correlation_key` 없이 들어와 기존 요청과 연결되지 않는다.
 - prompt contract binding이 없거나 stale인데 메인이 제멋대로 파일 읽기 순서를 바꿔 진행한다.
+- Windows 미검증 상태인데 cross-platform 운영 가능으로 문서화한다.
+- bridge/dashboard/scheduler 중 하나라도 장시간 실행에서 orphan process 또는 지속적 자원 증가를 만든다.
 - publication mode를 execution mode처럼 선언해 운영 축이 섞인다.
 - 전역 메인 thread id 하나를 모든 project의 판단자로 재사용한다.
 - alpha project의 state 또는 artifact를 beta project 메인이 읽고 채택한다.
@@ -2080,10 +2251,13 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - stop condition과 human gate가 밤샘 연속 작업의 상한선으로 문서화돼 있다.
 - 메인이 전략서, roadmap 현재 위치, execution evidence를 함께 읽어 상황을 인지한다.
 - “방향”, “현재 좌표”, “실제 변경” 세 층이 분리돼 있어 메인이 추측으로 진행하지 않는다.
+- canonical production Discord ingress가 Gateway adapter로 명시되어 있고, raw loopback bridge를 production edge로 오인하지 않는다.
+- webhook relay가 fallback일 뿐 canonical path가 아님을 분명히 하고, public ingress 요구사항을 전략 차원에서 분리한다.
+- Tailscale Serve/Funnel의 역할이 사람 접근면과 webhook fallback으로만 제한돼 Discord ingress와 혼동되지 않는다.
 
 ## Self-Evaluation
 
-- Score: `99.95/100`
+- Score: `88.0/100`
 
 강점:
 
@@ -2103,6 +2277,7 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - 메인 프롬프트 계약과 background cron 토글을 별도 계약으로 분리해, 재개 시점과 앱 복귀 시점의 운영 일관성을 높였다.
 - 사용자가 `이 문서를 읽고 현재 위치를 재구성해`라고 말할 수 있는 canonical 계약 문서를 별도 파일로 고정했다.
 - autonomous mode가 실제 external scheduler 런타임을 필요로 한다는 점과, scheduler의 lightweight precheck 책임을 문서 차원에서 닫았다.
+- canonical ingress를 Discord Gateway adapter로 고정해 이전의 가장 큰 구조 공백을 전략 차원에서 닫았다.
 
 감점:
 
@@ -2115,6 +2290,9 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - roadmap status와 evidence 기록이 부실하면 메인의 situational awareness 품질도 즉시 떨어진다.
 - prompt contract version이나 background trigger toggle 운용이 느슨하면 재개 품질과 foreground/background 경계가 바로 흔들린다.
 - external scheduler 설치/운영 품질이 낮으면 autonomous mode 가용성도 바로 흔들린다.
+- 현재 저장소는 Discord Gateway adapter 구현과 live end-to-end 증거를 확보했다.
+- 현재 bridge HTTP `/discord/interactions`는 internal/probe 경계이며, production Discord ingress 완성 근거로 계산할 수 없다.
+- 따라서 남은 평가는 ingress 방향이 아니라 OS-level 운영 반영과 실제 장기 운영 증거의 품질에 달려 있다.
 
 ## References
 
@@ -2125,6 +2303,12 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - [Discord Interactions Overview](https://docs.discord.com/developers/interactions/overview)
 - [Discord Receiving and Responding to Interactions](https://docs.discord.com/developers/interactions/receiving-and-responding)
 - [Discord Permissions](https://docs.discord.com/developers/topics/permissions)
+- [Tailscale Serve](https://tailscale.com/docs/features/serve)
+- [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
+- [Codex app for Windows](https://developers.openai.com/codex/app/windows/)
+- [Codex app features](https://developers.openai.com/codex/app/features/)
+- [Codex App Server](https://developers.openai.com/codex/app-server/)
+- [Codex config reference](https://developers.openai.com/codex/config-reference/#configtoml)
 - `/tmp/codex-app-schema/v2/TurnSteerParams.json`
 - `/tmp/codex-app-schema/v2/ThreadStatusChangedNotification.json`
 - `/tmp/codex-app-schema/v2/ThreadRollbackResponse.json`

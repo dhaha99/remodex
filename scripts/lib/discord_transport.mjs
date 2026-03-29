@@ -59,7 +59,15 @@ function interactionOptionValue(payload, name) {
   return payload.data?.options?.find((option) => option.name === name)?.value ?? null;
 }
 
+export function focusedInteractionOption(payload) {
+  return payload.data?.options?.find((option) => option.focused) ?? null;
+}
+
 function normalizeCommandClass(commandName) {
+  if (commandName === "projects") return "projects";
+  if (commandName === "create-project") return "create-project";
+  if (commandName === "attach-thread") return "attach-thread";
+  if (commandName === "use-project") return "use-project";
   if (commandName === "status" || commandName === "refresh-status") return "status";
   if (commandName === "reply") return "reply";
   if (commandName === "approve" || commandName === "approve-candidate") return "approve-candidate";
@@ -76,15 +84,36 @@ export function normalizeDiscordInteraction(payload, workspaceKey = "remodex") {
     operator_roles: payload.member?.roles ?? [],
     command_name: commandName,
     command_class: commandClass,
-    auth_class: commandClass === "approve-candidate" ? "approval" : "intent",
+    auth_class:
+      commandClass === "approve-candidate"
+        ? "approval"
+        : commandClass === "projects" || commandClass === "status"
+          ? "status"
+          : "intent",
     workspace_key: workspaceKey,
-    project_key: interactionOptionValue(payload, "project"),
+    project_key:
+      commandClass === "create-project"
+        ? interactionOptionValue(payload, "key")
+        : interactionOptionValue(payload, "project"),
+    display_name:
+      commandClass === "create-project"
+        ? interactionOptionValue(payload, "name")
+        : null,
+    goal:
+      commandClass === "create-project"
+        ? interactionOptionValue(payload, "goal")
+        : null,
+    thread_id:
+      commandClass === "attach-thread"
+        ? interactionOptionValue(payload, "thread_id")
+        : null,
     source_ref: interactionOptionValue(payload, "source_ref") ?? payload.id,
     request: interactionOptionValue(payload, "request"),
     artifact: interactionOptionValue(payload, "artifact"),
     correlation_key: correlationKey(payload),
     received_at: payload.timestamp ?? new Date().toISOString(),
     raw_interaction_id: payload.id,
+    raw_guild_id: payload.guild_id ?? null,
     raw_channel_id: payload.channel_id ?? null,
   };
 }
