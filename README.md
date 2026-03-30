@@ -57,6 +57,14 @@ Remodex는 Codex app-server, shared memory, Discord operator ingress, scheduler 
 - channel binding 또는 single-project default 기반 `project` 생략 UX
 - `/projects` 선택 카드, 상태/고정/작업지시 버튼, 작업지시 modal
 - project 카드의 `백그라운드 시작` / `앱 복귀` 버튼
+- bound Discord 채널 plain text bridge-thread conversation surface
+- `지금 어디까지 했어?` 같은 상태 질문이 실제 bridge thread turn으로 응답
+- bound 채널 plain text 작업 요청 -> bridge thread handoff -> main inbox/dispatch 적재
+- human gate / processed receipt 기반 자동 채널 알림을 bridge thread가 사람 말로 다시 요약
+- bridge thread 응답은 runtime validation을 통과해야 하고, 연결 식별자 누락/내부 용어 누출/잘못된 action은 reject 후 재작성
+- bridge validation이 반복 실패할 때만 마지막 수단 safe fallback을 허용하고, 기본 경로는 실제 bridge thread 자연어 응답 유지
+- bridge 지시문/동작 가이드북은 [DISCORD_BRIDGE_THREAD_GUIDEBOOK.md](/Users/mymac/my%20dev/remodex/DISCORD_BRIDGE_THREAD_GUIDEBOOK.md) 를 source of truth로 유지
+- Message Content intent 미설정 시 `mention/slash-only` degraded mode fallback
 - dispatch queue arbitration
 - foreground/background toggle
 - human gate candidate / foreground-only closure
@@ -156,6 +164,19 @@ node ops/render_scheduler_artifacts.mjs
    - background로 바꿔도 `approval 대기`, `must_human_check`, `pending_human_gate`가 있으면 scheduler는 계속 차단된다.
 7. 기존 Codex thread도 없고 shared memory 등록 프로젝트도 없을 때만 `/create-project` 또는 `새 프로젝트 등록` 버튼으로 bootstrap한다.
 8. `작업 지시` 버튼은 modal을 열고, 입력한 문장은 intent inbox로 기록된다.
+9. 채널이 이미 프로젝트에 바인딩되어 있으면 plain text는 먼저 실제 `bridge thread`의 새 turn으로 들어간다.
+   - `지금 어디까지 했어?`, `현재 상태 알려줘` 같은 질문은 bridge thread가 shared memory와 최근 note를 읽고 자연어로 답한다.
+   - 작업 요청은 bridge thread가 자연어로 확인 응답을 만든 뒤, structured inbox event로 메인에 handoff한다.
+   - 즉 표면은 채팅이지만, 내부 실행은 여전히 `Discord -> bridge thread -> shared memory -> main` 규약을 따른다.
+   - unbound 채널에서는 bot mention이 있을 때만 도움말을 돌려준다.
+10. background/foreground, human gate, processed completion 같은 주요 변화는 Discord 채널에 자동 알림으로 다시 올라온다.
+   - 자동 알림도 템플릿 dump가 아니라 bridge thread가 최근 note를 읽고 사람 말로 다시 요약한다.
+11. Discord 앱에 Message Content intent가 안 켜져 있으면 adapter는 죽지 않고 `mention/slash-only` degraded mode로 다시 붙는다.
+   - 이 경우 slash command, 버튼, mention 메시지는 계속 동작한다.
+   - adapter 상태 파일의 `conversation_mode = mention_only`는 고장이 아니라 fallback 상태다.
+   - 이 경우 응답 카드에도 `대화 모드: mention_only` 안내가 같이 붙는다.
+   - 바인딩된 채널 plain text 대화는 Message Content intent를 켜야 완전하게 동작한다.
+   - intent가 꺼진 동안은 `@Remodex Pilot 지금 어디까지 했어?`, `@Remodex Pilot 로그인 테스트부터 진행해`처럼 멘션을 포함해야 한다.
 
 ### 3. Dashboard
 

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { DiscordConversationService } from "./lib/discord_conversation_service.mjs";
 import { DiscordGatewayAdapterRuntime } from "./lib/discord_gateway_adapter_runtime.mjs";
 import { DiscordInteractionCallbackTransport } from "./lib/discord_interaction_callback_transport.mjs";
 import { processGatewayInteraction } from "./lib/discord_gateway_operator_responder.mjs";
@@ -69,6 +70,17 @@ function makeFetchCollector() {
       return new Response(null, { status: 204 });
     },
   };
+}
+
+class FakeChannelTransport {
+  constructor() {
+    this.messages = [];
+  }
+
+  async createChannelMessage(payload) {
+    this.messages.push(payload);
+    return { id: `fake-${this.messages.length}` };
+  }
 }
 
 async function seedProject(paths) {
@@ -180,12 +192,100 @@ try {
 
   const foregroundToggle = await readJsonIfExists(path.join(alphaPaths.stateDir, "background_trigger_toggle.json"));
 
+  const channelTransport = new FakeChannelTransport();
+  const fakeBridgeThreadService = {
+    called: false,
+    async handleBoundMessage({ payload, binding }) {
+      this.called = true;
+      const wantsBackground = /백그라운드|스케쥴러|스케줄러|background/i.test(String(payload?.content ?? ""));
+      const modeTarget = wantsBackground ? "background" : "foreground";
+      const outcome = await runtime.handleNormalizedCommand({
+        source: "discord",
+        verified_identity: "bridge_thread",
+        operator_id: payload.author?.id ?? payload.member?.user?.id ?? null,
+        operator_roles: ["operator"],
+        command_name: `bridge-thread-set-mode-${modeTarget}`,
+        command_class: "set-mode",
+        auth_class: "intent",
+        workspace_key: "remodex",
+        project_key: binding?.project_key ?? null,
+        display_name: null,
+        goal: null,
+        mode_target: modeTarget,
+        thread_id: null,
+        source_ref: payload.id,
+        request: null,
+        artifact: null,
+        correlation_key: `${payload.guild_id}:${payload.channel_id}:${payload.id}:bridge`,
+        received_at: payload.timestamp ?? new Date().toISOString(),
+        raw_interaction_id: null,
+        raw_message_id: payload.id,
+        raw_guild_id: payload.guild_id ?? null,
+        raw_channel_id: payload.channel_id ?? null,
+      });
+      return {
+        operator_response:
+          modeTarget === "background"
+            ? "좋습니다. 이 채널 기준 프로젝트를 백그라운드 모드로 전환했습니다."
+            : "좋습니다. 이 채널 기준 프로젝트를 foreground 모드로 되돌렸습니다.",
+        bridge_thread_id: "bridge-mode-thread",
+        bridge_turn_id: `bridge-turn-${modeTarget}`,
+        bridge_action: modeTarget === "background" ? "set_mode_background" : "set_mode_foreground",
+        project_key: binding?.project_key ?? null,
+        handoff_result: outcome.result ?? null,
+        route: outcome.result?.route ?? "bridge_reply",
+      };
+    },
+  };
+  const conversationService = new DiscordConversationService({
+    runtime,
+    channelTransport,
+    bridgeThreadService: fakeBridgeThreadService,
+    sharedBase,
+    workspaceKey: "remodex",
+    outboxPollIntervalMs: 60_000,
+  });
+
+  const textBackgroundOutcome = await conversationService.handleMessageCreate({
+    id: "mode-text-background-001",
+    guild_id: "guild-mode",
+    channel_id: "channel-mode",
+    timestamp: new Date().toISOString(),
+    type: 0,
+    content: "백그라운드 스케쥴러 활성화해봐",
+    author: { id: "operator-mode", username: "operator", bot: false },
+    member: { user: { id: "operator-mode" }, roles: [] },
+    mentions: [],
+  });
+
+  const textBackgroundToggle = await readJsonIfExists(path.join(alphaPaths.stateDir, "background_trigger_toggle.json"));
+
+  const textForegroundOutcome = await conversationService.handleMessageCreate({
+    id: "mode-text-foreground-001",
+    guild_id: "guild-mode",
+    channel_id: "channel-mode",
+    timestamp: new Date().toISOString(),
+    type: 0,
+    content: "앱 복귀해",
+    author: { id: "operator-mode", username: "operator", bot: false },
+    member: { user: { id: "operator-mode" }, roles: [] },
+    mentions: [],
+  });
+
+  const textForegroundToggle = await readJsonIfExists(path.join(alphaPaths.stateDir, "background_trigger_toggle.json"));
+
   summary.projects_operator_message = projectsOutcome.operator_message;
   summary.status_operator_message = statusOutcome.operator_message;
   summary.background_operator_message = backgroundOutcome.operator_message;
   summary.foreground_operator_message = foregroundOutcome.operator_message;
   summary.background_toggle = backgroundToggle;
   summary.foreground_toggle = foregroundToggle;
+  summary.text_background_outcome = textBackgroundOutcome;
+  summary.text_foreground_outcome = textForegroundOutcome;
+  summary.text_background_toggle = textBackgroundToggle;
+  summary.text_foreground_toggle = textForegroundToggle;
+  summary.text_messages = channelTransport.messages;
+  summary.bridge_thread_called_for_text_mode_toggle = fakeBridgeThreadService.called;
   summary.callback_requests = collector.requests;
   summary.finishedAt = new Date().toISOString();
 
@@ -212,11 +312,28 @@ try {
     foregroundToggle?.mode === "foreground" &&
     String(foregroundOutcome.operator_message ?? "").includes("scheduler: blocked_expected");
 
+  const textBackgroundUpdated =
+    textBackgroundOutcome?.ignored === false &&
+    textBackgroundOutcome?.result?.route === "project_mode_updated" &&
+    textBackgroundToggle?.background_trigger_enabled === true &&
+    textBackgroundToggle?.foreground_session_active === false &&
+    String(textBackgroundOutcome?.response_text ?? "").includes("백그라운드");
+
+  const textForegroundUpdated =
+    textForegroundOutcome?.ignored === false &&
+    textForegroundOutcome?.result?.route === "project_mode_updated" &&
+    textForegroundToggle?.background_trigger_enabled === false &&
+    textForegroundToggle?.foreground_session_active === true &&
+    /foreground|앱|복귀/.test(String(textForegroundOutcome?.response_text ?? ""));
+
   summary.project_card = projectCard;
   summary.status =
     projectCard &&
     backgroundUpdated &&
-    foregroundUpdated
+    foregroundUpdated &&
+    textBackgroundUpdated &&
+    textForegroundUpdated &&
+    fakeBridgeThreadService.called === true
       ? "PASS"
       : "FAIL";
 } catch (error) {

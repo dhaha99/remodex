@@ -37,7 +37,7 @@
 
 - Strategy baseline: `Shared Working Memory Strategy v3`
 - Execution plan version: `2026-03-29`
-- Current phase: `Phase 15 - Discord Mode Toggle UX complete`
+- Current phase: `Phase 16 - Discord Conversation Surface complete`
 - Current active package: `none`
 - Current active WBS: `none`
 - Immediate next smallest batch:
@@ -713,3 +713,36 @@
   - background 전환 응답은 scheduler arm 여부와 차단 이유를 같이 보여준다
   - foreground 전환 응답은 scheduler 차단이 정상임을 명확히 보여준다
   - approval 대기나 `must_human_check`가 있을 때 background 전환이 그것을 우회하지 않는다
+
+### EP-1000 Discord Conversation Surface
+
+- Status: `completed`
+- WBS refs: `16.1`, `16.2`
+- Strategy refs:
+  - [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule)
+  - [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule)
+- Validation basis:
+  - [Probe 94](./verification/VERIFICATION_LOG.md#2026-03-29---probe-94-discord-conversation-surface)
+  - [Probe 99](./verification/VERIFICATION_LOG.md#2026-03-30---probe-99-discord-bridge-thread-conversation)
+- Progress evidence:
+  - [scripts/lib/discord_transport.mjs](./scripts/lib/discord_transport.mjs)
+  - [scripts/lib/discord_bot_channel_transport.mjs](./scripts/lib/discord_bot_channel_transport.mjs)
+  - [scripts/lib/discord_conversation_service.mjs](./scripts/lib/discord_conversation_service.mjs)
+  - [scripts/remodex_discord_gateway_adapter.mjs](./scripts/remodex_discord_gateway_adapter.mjs)
+  - [scripts/probe_discord_conversation_surface.mjs](./scripts/probe_discord_conversation_surface.mjs)
+  - [verification/discord_conversation_surface_probe_summary.json](./verification/discord_conversation_surface_probe_summary.json)
+- Deliverables:
+  - bound channel plain text bridge-thread conversation
+  - bot mention 기반 unbound channel help path
+  - channel message sender
+  - human gate / processed completion automatic notify worker
+  - adapter state separation for Discord event log vs app-server log
+  - Message Content intent 미설정 시 mention/slash-only degraded fallback
+  - main note를 bridge thread가 operator-facing 자연어로 다시 요약하는 notification path
+- Exit criteria:
+  - bound 채널 plain text 상태 질문이 실제 bridge thread turn으로 응답된다
+  - bound 채널 plain text 작업 요청이 bridge thread handoff를 거쳐 inbox/dispatch로 적재되고 채널에 접수 응답이 다시 올라온다
+  - unbound 채널 평문은 mention 기반 도움말로 제한된다
+  - human gate / processed completion이 bridge thread 요약을 거쳐 Discord 채널 자동 알림으로 다시 올라온다
+  - Gateway adapter state에 bot user와 app-server log 경로가 반영된다
+  - Message Content intent가 거부돼도 adapter는 4014로 영구 정지하지 않고 degraded mode로 다시 붙는다

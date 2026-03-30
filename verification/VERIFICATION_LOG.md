@@ -4212,3 +4212,217 @@
 - Discord ingress는 `member.roles` 누락/빈 배열을 그대로 ACL 차단 사유로 쓰면 안 된다.
 - non-approval 명령은 verified operator identity를 기준으로 `operator` fallback을 적용하고, approval 계열만 별도 admin ACL을 유지해야 한다.
 - quarantine 응답은 `normalized.project_key`가 비어 있어도 실제 resolved project key를 우선 노출해야 한다.
+
+## 2026-03-29 - Probe 94: Discord conversation surface
+
+### Goal
+- bound Discord 채널에서 plain text 상태 질문과 작업 요청이 slash command 없이도 대화형으로 동작하는지 검증한다.
+- unbound 채널 mention 도움말, human gate 자동 알림, processed completion 자동 알림까지 같은 transport에서 다시 채널로 나가는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_conversation_surface.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_conversation_surface.mjs)
+- Summary output: [verification/discord_conversation_surface_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_conversation_surface_probe_summary.json)
+
+### Result
+- Status: PASS
+- bound 채널 plain text `지금 어디까지 했어?`는 channel message sender를 통해 상태 응답으로 다시 전송됐다.
+- bound 채널 plain text `로그인 테스트부터 진행해`는 `conversation-intent`로 정규화되어 inbox/dispatch 경로로 적재됐고, 채널에는 접수 응답이 다시 올라왔다.
+- unbound 채널 mention 평문은 `/projects` 또는 `/attach-thread`를 먼저 쓰라는 도움말로 응답했다.
+- `human_gate_notification`, `processed/*` 기반 completion 요약도 자동으로 같은 채널에 다시 올라왔다.
+- adapter state에는 `bot_user_id`, `app_server_log_path`가 별도로 기록됐다.
+
+### Evidence
+- `adapter_state.snapshot.ready_seen = true`
+- `status_reply.content` contains `Conversation Demo 현재 상태입니다.`
+- `intent_reply.content` contains `작업 요청을 기록했습니다.`
+- `help_reply.content` contains `이 채널은 아직 프로젝트에 연결되지 않았습니다.`
+- `human_gate_reply.content` contains `승인 확인이 필요합니다.`
+- `processed_reply.content` contains `작업이 처리됐습니다.`
+- `inbox_record.command_class = intent`
+- `dispatch_record.route_decision = dispatch_queue`
+- `delivery_state.processed_records["project-conversation/2026-03-29T18-00-00.000Z_consumed_conversation-1.json"].disposition = delivered`
+
+### Strategy Impact
+- Discord는 slash/button 운영 콘솔을 넘어서, bound 채널 plain text conversation surface를 제공해야 한다.
+- 자동 알림은 Discord 자체를 truth로 삼지 말고 `router/outbox/*`, `processed/*`를 읽어 재전송하는 watcher로 유지해야 한다.
+- app-server JSON-RPC 로그와 Discord event log는 분리해야 운영 추적이 가능하다.
+
+## 2026-03-29 - Probe 95: Discord Message Content fallback
+
+### Goal
+- Discord 앱에서 Message Content intent가 허용되지 않을 때 Gateway adapter가 4014로 영구 정지하지 않고 degraded mode로 다시 붙는지 검증한다.
+- degraded mode에서도 slash/button/mention surface를 살리기 위해 intents를 자동으로 낮추고 state에 차단 이유를 남기는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_gateway_message_content_fallback.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_gateway_message_content_fallback.mjs)
+- Summary output: [verification/discord_gateway_message_content_fallback_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_gateway_message_content_fallback_probe_summary.json)
+
+### Result
+- Status: PASS
+- 첫 identify는 `33281`로 나갔고 fake Gateway가 `4014 Disallowed intent(s).`로 닫았다.
+- adapter는 자동으로 intents를 `513`으로 낮춘 뒤 다시 연결했고, 두 번째 identify 후 `READY`를 받았다.
+- state에는 `conversation_mode = mention_only`, `conversation_blocker = message_content_intent_disabled_or_unconfigured`, `active_intents = 513`이 기록됐다.
+- event log에도 `gateway_intents_fallback`이 남았다.
+
+### Evidence
+- `gateway_events[0..]` contains `identify_received` with `intents = 33281`
+- `gateway_events[0..]` contains second `identify_received` with `intents = 513`
+- `adapter_state.conversation_mode = mention_only`
+- `adapter_state.conversation_blocker = message_content_intent_disabled_or_unconfigured`
+- `adapter_state.active_intents = 513`
+- `adapter_state.snapshot.ready_seen = true`
+- `events_log[0].type = gateway_intents_fallback`
+
+### Strategy Impact
+- Message Content intent가 꺼져 있어도 canonical Gateway adapter 전체가 죽으면 안 된다.
+- degraded mode에서는 bound plain text conversation을 완전하게 보장할 수 없지만, slash/button/mention surface는 유지해야 한다.
+
+## 2026-03-29 - Probe 96: Discord conversation mode disclosure
+
+### Goal
+- Discord 앱이 `mention_only` degraded mode로 동작할 때 `/projects`, `/status` 같은 응답 카드에 현재 제약과 실제 사용 예시가 명시적으로 드러나는지 검증한다.
+- operator가 Discord 화면만 보고도 왜 평문 대화가 제한되는지 이해할 수 있어야 한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_conversation_mode_disclosure.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_conversation_mode_disclosure.mjs)
+- Summary output: [verification/discord_conversation_mode_disclosure_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_conversation_mode_disclosure_probe_summary.json)
+
+### Result
+- Status: PASS
+- `/projects` 응답 카드와 `/status` 응답 카드 모두 `대화 모드: mention_only` 안내를 포함했다.
+- 안내 문구에는 실제 사용 예시인 ``@Remodex Pilot 지금 어디까지 했어?``가 함께 표시됐다.
+- degraded mode에서도 프로젝트 선택 카드, 상태 카드, mode toggle 버튼 배치는 유지됐다.
+
+### Evidence
+- `projects_body.content` contains `대화 모드: mention_only`
+- `projects_body.content` contains `@Remodex Pilot 지금 어디까지 했어?`
+- `status_body.content` contains `대화 모드: mention_only`
+- `status_body.content` contains `@Remodex Pilot 지금 어디까지 했어?`
+
+### Strategy Impact
+- degraded mode는 조용히 제한되면 안 되고, operator 화면에서 즉시 이해 가능한 안내가 같이 나가야 한다.
+- `mention_only`는 장애가 아니라 fallback 상태라는 점을 UI 문구로 분명히 보여줘야 한다.
+
+## 2026-03-29 - Probe 97: Discord mention-only conversation surface
+
+### Goal
+- Message Content intent가 꺼진 상태에서도 bound 채널 mention 메시지로 상태 질문과 작업 요청이 계속 가능한지 검증한다.
+- 읽을 수 없는 평문 메시지는 조용히 무시하지 않고 설정 안내로 응답하는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_mention_only_conversation_surface.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_mention_only_conversation_surface.mjs)
+- Summary output: [verification/discord_mention_only_conversation_surface_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_mention_only_conversation_surface_probe_summary.json)
+
+### Result
+- Status: PASS
+- bound 채널 mention 상태 질문은 status 응답으로 다시 전송됐다.
+- bound 채널 mention 작업 요청은 inbox로 적재됐고, 채널에는 사람 친화적인 접수 응답이 올라왔다.
+- Message Content intent 때문에 읽을 수 없는 케이스는 `Developer Portal에서 Message Content intent를 켜라`는 설정 안내로 응답했다.
+
+### Evidence
+- `status_result.response_text` contains `Mention Demo 현재 상태입니다.`
+- `intent_result.response_text` contains `Mention Demo에 작업 요청을 기록했습니다.`
+- `unavailable_result.response_text` contains `Message Content intent가 꺼져 있어`
+- `inbox_record.project_key = project-mention`
+- `inbox_record.request = 로그인 테스트부터 진행해`
+
+### Strategy Impact
+- Message Content intent가 꺼져 있어도 mention 기반 상태 질문과 작업 지시는 유지해야 한다.
+- degraded mode에서조차 operator 응답은 내부 project key보다 display name을 우선 써야 한다.
+
+## 2026-03-29 - Probe 98: Discord processed notification quality
+
+### Goal
+- `processed/*` 기반 자동 채널 알림이 내부 파일 경로, 원시 근거 링크, thread id를 그대로 뿌리지 않고 사람 기준의 짧은 완료/대기 요약으로 정리되는지 검증한다.
+- status 응답 같은 이미 채널에 별도 응답이 있는 receipt는 completion 알림으로 다시 보내지 않는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_processed_notification_quality.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_processed_notification_quality.mjs)
+- Summary output: [verification/discord_processed_notification_quality_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_processed_notification_quality_probe_summary.json)
+
+### Result
+- Status: PASS
+- `source_command_class = status` receipt는 `ignored_status_receipt`로 처리돼 채널에 다시 전송되지 않았다.
+- noisy `intent` receipt는 `Quality Demo 응답이 도착했습니다.` 형식의 짧은 메시지 한 건만 전송됐다.
+- 요약에는 `아직 실제 작업 결과는 오지 않았습니다.`만 남고, `/Users/...`, `router/outbox`, `turn:` 같은 내부 디버그 정보는 제거됐다.
+
+### Evidence
+- `status_delivery.disposition = ignored_status_receipt`
+- `messages.length = 1`
+- `messages[0].content` contains `Quality Demo 응답이 도착했습니다.`
+- `messages[0].content` contains `아직 실제 작업 결과는 오지 않았습니다.`
+- `messages[0].content` does not contain `/Users/`
+- `messages[0].content` does not contain `router/outbox`
+- `messages[0].content` does not contain `turn:`
+
+### Strategy Impact
+- Discord completion 알림은 raw final_text dump가 아니라 사람 기준의 짧은 completion/progress 요약이어야 한다.
+- status 계열 receipt는 이미 상태 응답이 별도로 있으므로 completion 알림 watcher에서 다시 전송하지 않는 편이 맞다.
+
+## 2026-03-30 - Probe 99: Discord bridge-thread conversation
+
+### Goal
+- 바인딩된 Discord 채널의 평문이 규칙 기반 템플릿이 아니라 실제 Codex bridge thread turn으로 들어가는지 검증한다.
+- bridge thread가 상태 질문에 자연어로 답하고, 작업 요청이면 structured inbox handoff를 남기며, processed/human gate note도 다시 사람 말로 요약하는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_bridge_thread_conversation.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_bridge_thread_conversation.mjs)
+- Summary output: [verification/discord_bridge_thread_conversation_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_bridge_thread_conversation_probe_summary.json)
+
+### Result
+- Status: PASS
+- bound 채널 상태 질문은 실제 bridge thread turn으로 처리됐고, 채널에는 자연어 상태 설명이 다시 전송됐다.
+- 작업 요청은 bridge thread가 handoff intent를 생성한 뒤 `inbox/`에 structured record를 남겼다.
+- 같은 run에서 main thread turn count는 `1 -> 1`로 유지돼 bridge thread가 메인을 직접 advance하지 않았다.
+- processed receipt와 human gate notification도 bridge thread가 note를 읽어 짧은 사람용 문장으로 다시 요약했다.
+
+### Evidence
+- `statusOutcome.result.route = bridge_reply`
+- `intentOutcome.result.route = inbox`
+- `bindingAfterStatus.bridge_thread_id` exists
+- `inboxRecord.verified_identity = bridge_thread`
+- `turnCounts.main_before = 1`
+- `turnCounts.main_after_intent = 1`
+- `turnCounts.bridge_after_notifications >= 5`
+- `sentMessages[0]` does not contain `route:`
+- `sentMessages[2]` does not contain `/Users/`
+- `sentMessages[3]` contains `승인 확인이 필요한 상태`
+
+### Strategy Impact
+- bound Discord 채널 평문은 실제 bridge thread turn을 우선 타야 한다.
+- bridge thread는 상태 설명과 handoff만 담당하고, 메인을 직접 advance하면 안 된다.
+- main이 남긴 processed/human gate note는 bridge thread가 읽고 operator-facing 자연어로 다시 풀어주는 편이 맞다.
+
+## 2026-03-30 - Probe 100: Discord bridge-thread validation and repair
+
+### Goal
+- bridge thread가 guidebook을 어기거나 내부 용어를 흘렸을 때도 그대로 송신하지 않고 runtime validation에서 reject/rewrite 되는지 검증한다.
+- 연결 질문, work request handoff, human gate 알림 세 가지 대표 failure class를 모두 강제로 틀리게 만든 뒤 최종 operator 응답이 fact bundle 범위 안의 자연어로 복구되는지 확인한다.
+
+### Setup
+- Probe runner: [scripts/probe_discord_bridge_thread_validation.mjs](/Users/mymac/my%20dev/remodex/scripts/probe_discord_bridge_thread_validation.mjs)
+- Summary output: [verification/discord_bridge_thread_validation_probe_summary.json](/Users/mymac/my%20dev/remodex/verification/discord_bridge_thread_validation_probe_summary.json)
+
+### Result
+- Status: PASS
+- 첫 identity 응답은 메인 이름/짧은 ID/workspace를 빼먹도록 의도적으로 잘못 만들었고, runtime validation이 이를 reject한 뒤 두 번째 turn에서 `Validation Demo`, `실제 작업 메인`, `019d3cc3-a70`, `remodex`를 포함한 응답으로 복구했다.
+- 첫 work request 응답은 `action = none`으로 잘못 돌렸고, validation이 reject한 뒤 `handoff_intent`와 실제 request 문장 `로그인 테스트를 최우선으로 진행해줘.` 로 복구했다.
+- 첫 human gate 알림은 `/Users/.../outbox/...json` 경로를 포함하도록 만들었고, validation이 reject한 뒤 `승인 확인이 필요해서 잠시 대기 중` 수준의 사람용 문장으로 복구했다.
+- 세 경로 모두 safe fallback까지 내려가지 않았고, bridge thread 재작성만으로 정상 operator 응답을 만들었다.
+
+### Evidence
+- `identityOutcome.bridge_repaired = true`
+- `identityOutcome.bridge_validation.ok = true`
+- `identityOutcome.operator_response` contains `실제 작업 메인`
+- `identityOutcome.operator_response` contains `019d3cc3-a70`
+- `intentOutcome.bridge_repaired = true`
+- `intentOutcome.route = inbox`
+- `intentCommand.request = 로그인 테스트를 최우선으로 진행해줘.`
+- `notificationOutcome.bridge_repaired = true`
+- `notificationOutcome.operator_response` does not contain `/Users/`
+- `notificationOutcome.bridge_fallback_used = false`
+
+### Strategy Impact
+- bridge 품질 보장은 guidebook만으로 충분하지 않고, runtime validation/rewrite 계층이 같이 있어야 한다.
+- bridge thread는 자연어 surface를 담당하되, identity fact 누락/내부 용어 누출/잘못된 action 선택은 operator에게 나가기 전에 reject되어야 한다.
+- safe fallback은 최후 수단으로만 남겨야 하고, 기본 경로는 여전히 실제 bridge thread의 자율 응답이어야 한다.

@@ -14,7 +14,15 @@ fi
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
 : "${REMODEX_SHARED_BASE:=$REMODEX_WORKSPACE/runtime/external-shared-memory}"
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 
 export REMODEX_WORKSPACE
 export REMODEX_SHARED_BASE

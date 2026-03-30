@@ -211,6 +211,19 @@
 | 15.2.1 | `completed` | `EP-990` | `백그라운드 시작`, `앱 복귀` 버튼 | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
 | 15.2.2 | `completed` | `EP-990` | mode 전환 후 scheduler 상태 설명 | [Background Cron Toggle Rule](./MAIN_COORDINATOR_PROMPT_CONTRACT.md#background-cron-toggle-rule) |
 
+### 16.0 Discord Conversation Surface
+
+| WBS | Status | Plan Ref | Deliverable | Strategy Ref |
+| --- | --- | --- | --- | --- |
+| 16.1 | `completed` | `EP-1000` | bound channel plain text intake | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 16.1.1 | `completed` | `EP-1000` | plain text status/intention normalization | [Discord Identity And Authorization Rule](./STRATEGY.md#discord-identity-and-authorization-rule) |
+| 16.1.2 | `completed` | `EP-1000` | bot mention 기반 unbound channel help path | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 16.1.3 | `completed` | `EP-1000` | 실제 bridge thread 대화/핸드오프 | [Conversation Bridge Thread Pattern](./STRATEGY.md#conversation-bridge-thread-pattern) |
+| 16.2 | `completed` | `EP-1000` | channel auto-reply and notify worker | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 16.2.1 | `completed` | `EP-1000` | Discord channel message sender | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 16.2.2 | `completed` | `EP-1000` | human gate / processed completion 자동 알림 | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+| 16.2.3 | `completed` | `EP-1000` | Message Content intent fallback (`mention/slash-only`) | [Discord Operator Console Rule](./STRATEGY.md#discord-operator-console-rule) |
+
 ## Rollup Rules
 
 - parent WBS는 child 중 하나라도 `in_progress`면 `in_progress`다.
@@ -228,6 +241,7 @@
 - `13.0`은 `/projects` 선택 카드, 상태/고정/작업 지시 버튼, modal submit까지 포함해 component UX를 정리했다.
 - `14.0`은 shared memory가 비어 있어도 existing Codex thread를 발견해 attach하는 첫 진입 경로를 정리했고, 추천 보기만 강제하지 않고 전체 보기/직접 연결까지 제공한다.
 - `15.0`은 foreground/background 전환을 터미널 파일 수정이 아니라 Discord 버튼과 slash command에서 직접 수행하도록 정리했다.
+- `16.0`은 bound 채널 plain text 대화, 실제 bridge thread handoff, unbound mention 도움말, human gate/processed completion 자동 알림까지 포함해 Discord를 대화형 표면으로 확장했다.
   - canonical ingress는 이제 문서, 코드, bootstrap, local probe, live external edge 증거를 모두 갖췄다.
 - Next smallest batch:
   - `실제 launchd 등록 또는 Windows 실제 실행 증거 수집이 필요할 때 새 배치를 연다`

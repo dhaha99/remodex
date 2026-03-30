@@ -122,8 +122,10 @@ try {
     threadId,
   });
   await writeAtomicJson(path.join(paths.stateDir, "coordinator_status.json"), {
-    type: "notLoaded",
+    type: "active",
     observed_at: new Date().toISOString(),
+    threadId,
+    activeFlags: [],
   });
   await writeAtomicJson(path.join(paths.stateDir, "background_trigger_toggle.json"), {
     background_trigger_enabled: true,
@@ -164,12 +166,23 @@ try {
   summary.schedulerStdout = stdout;
   summary.schedulerStderr = stderr;
   summary.schedulerRuntime = await readJsonIfExists(path.join(paths.runtimeDir, "scheduler_runtime.json"));
+  summary.coordinatorStatusAfterTick = await readJsonIfExists(path.join(paths.stateDir, "coordinator_status.json"));
 
   const wakeSucceeded =
-    summary.schedulerRuntime?.decision === "attached_thread_wake" &&
-    summary.schedulerRuntime?.result?.delivery_decision === "attached_thread_resumed" &&
-    Boolean(summary.schedulerRuntime?.result?.thread_id) &&
-    Boolean(summary.schedulerRuntime?.result?.resumed_status);
+    (
+      summary.schedulerRuntime?.decision === "attached_thread_wake" &&
+      summary.schedulerRuntime?.result?.delivery_decision === "attached_thread_resumed" &&
+      Boolean(summary.schedulerRuntime?.result?.thread_id) &&
+      Boolean(summary.schedulerRuntime?.result?.resumed_status) &&
+      summary.coordinatorStatusAfterTick?.type === summary.schedulerRuntime?.result?.resumed_status
+    ) ||
+    (
+      summary.schedulerRuntime?.decision === "noop" &&
+      Array.isArray(summary.schedulerRuntime?.reasons) &&
+      summary.schedulerRuntime.reasons.includes("no_pending_work") &&
+      summary.coordinatorStatusAfterTick?.type === summary.threadStatusBeforeAttach &&
+      summary.threadStatusBeforeAttach !== "active"
+    );
 
   summary.finishedAt = new Date().toISOString();
   summary.status = wakeSucceeded ? "PASS" : "FAIL";

@@ -1572,6 +1572,10 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 - operator UX는 최소한 `/projects`, `project` 자동완성, `/use-project` 채널 기본 프로젝트 바인딩을 제공하는 편이 맞다
 - operator UX는 slash command만 두지 말고, 가능하면 message components 기반 `project select -> status/bind/intent buttons -> modal` 흐름을 제공하는 편이 좋다
 - operator UX는 foreground/background 전환도 Discord에서 직접 할 수 있어야 하고, 최소한 `백그라운드 시작`, `앱 복귀`, `/background-on`, `/foreground-on`을 제공하는 편이 맞다
+- operator UX는 slash/button만으로 끝내지 말고, project에 바인딩된 채널에서는 plain text conversation surface도 제공하는 편이 맞다
+- bound 채널의 `지금 어디까지 했어?`, `현재 상태 알려줘` 같은 평문 질문은 status 조회로 정규화하는 편이 맞다
+- bound 채널의 일반 평문은 기본적으로 작업 요청으로 받아 `conversation-intent -> inbox/dispatch` 경로를 타게 하는 편이 맞다
+- unbound 채널에서는 일반 평문을 무차별 수집하지 말고, bot mention이 있을 때만 `/projects` 또는 `/attach-thread` 도움말을 돌려주는 편이 맞다
 - `/projects`는 shared memory 등록 프로젝트만 보여주면 안 되고, existing Codex thread 중 아직 binding되지 않은 attach 후보도 같이 보여줘야 한다
 - `추천 보기`는 현재 저장소 중심으로 좁혀도 되지만, `전체 보기`는 다른 저장소의 식별 가능한 existing Codex thread까지 포함하는 편이 맞다
 - attach 후보는 숨은 단일 heuristic만 강제하지 말고, 최소한 `추천 보기`, `다른 저장소 포함 전체 보기`, `thread id 직접 연결` 세 경로를 operator가 선택할 수 있게 하는 편이 맞다
@@ -1584,6 +1588,9 @@ Discord는 이 전략에서 **사람용 operator ingress**로는 유효하지만
 - operator-facing ingress는 빠르게 `accepted`를 돌려주고, 실제 delivery는 inbox/dispatch 경로에서 이어가는 비동기 ack 모델을 권장한다
 - 즉 `interaction accepted`와 `same-thread delivery completed`는 다른 상태로 취급해야 한다
 - status summary, human gate notification, blocker notification은 transport 이전에 `router/outbox/*` truth를 먼저 남기는 구조를 권장한다
+- processed completion도 transport 이전에 `processed/*` truth를 먼저 남기고, Discord 자동 알림은 그 truth를 읽어 채널에 다시 보내는 편이 맞다
+- Discord는 command-response 콘솔을 넘어서 operator conversation surface가 되어야 하지만, 내부적으로는 여전히 `Discord -> bridge/shared memory -> main` 구조를 유지해야 한다
+- Discord 앱에 Message Content intent가 안 켜져 있어도 canonical Gateway adapter가 통째로 죽으면 안 되고, 최소한 slash/button/mention 흐름은 유지하는 degraded mode fallback을 두는 편이 맞다
 - human gate notification은 approval loop 중 `waitingOnApproval`가 다시 들어오더라도 lane이 완전히 끝나기 전까지는 한 번만 발행하는 dedupe를 권장한다
 - background 전환 응답은 `scheduler`가 실제로 arm됐는지, 어떤 blocked reason 때문에 아직 진행이 안 되는지까지 함께 설명하는 편이 맞다
 - foreground 전환 응답은 scheduler가 차단되는 것이 정상임을 operator에게 명확히 보여주는 편이 맞다
@@ -1999,12 +2006,18 @@ Codex cloud/background task를 쓰더라도 authoritative local repo 반영은 f
 - bridge thread는 `state/*` truth writer가 아니며, repo truth writer도 아니다.
 - bridge thread가 busy 상태의 메인과 대화할 때도 direct injection 대신 inbox/dispatch 규약을 따라야 한다.
 - bridge thread는 second coordinator가 아니라 operator console surface다.
+- bound Discord 채널의 plain text는 bridge thread의 실제 turn으로 들어가야 하고, 규칙 기반 템플릿 응답만으로 대화면을 흉내 내면 안 된다.
+- main이 남긴 `processed`/`human_gate` note는 bridge thread가 읽어 사람 말로 다시 정리해 operator에게 알려주는 편이 맞다.
+- bridge thread 응답은 runtime validation을 거쳐야 한다. 연결 질문인데 실제 메인 이름/짧은 ID/workspace를 빠뜨리거나, 내부 route/path/json 키를 노출하거나, work request에 handoff action을 고르지 못하면 reject 후 재작성하는 편이 맞다.
+- safe fallback은 bridge thread가 반복해서 validation을 통과하지 못할 때만 마지막 수단으로 허용하고, fact bundle 범위를 넘어선 설명이나 템플릿 dump를 다시 도입하면 안 된다.
 
 검증 근거:
 
 - `Probe 43`에서 bridge thread는 같은 project에서 3개 turn을 수행하며 상태 설명, intent 파일 기록, queue 확인을 수행했다.
 - 같은 run에서 main thread의 turn count는 `1 -> 1`로 유지돼 bridge thread가 메인을 직접 advance하지 않음이 확인됐다.
 - bridge thread는 target main thread를 명시한 inbox record만 남겼고, 메인 판단을 대신하지 않았다.
+- `Probe 99`에서 bound Discord 채널 평문이 실제 bridge thread turn으로 들어가 status 질문, 작업 요청 handoff, processed note 요약, human gate note 요약까지 모두 수행했다.
+- `Probe 100`에서 bridge validation layer는 잘못된 identity 응답, 잘못된 handoff action, 내부 경로가 섞인 human gate 알림을 모두 reject 후 재작성했고, 최종 operator 응답은 fact bundle 범위 안의 자연어로 복구됐다.
 
 ### Mode G: Autonomous Trigger Mode
 

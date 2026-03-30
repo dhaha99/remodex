@@ -16,7 +16,15 @@ fi
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
 : "${REMODEX_DASHBOARD_HTTP_HOST:=127.0.0.1}"
 : "${REMODEX_DASHBOARD_HTTP_PORT:=8790}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 
 export REMODEX_WORKSPACE
 export REMODEX_SHARED_BASE

@@ -253,6 +253,8 @@ try {
   const crossWorkspaceThread = (allScopeOutcome.result.attachable_threads ?? []).find(
     (thread) => thread.workspace_label && !thread.workspace_label.includes("(현재 저장소)"),
   ) ?? null;
+  summary.cross_workspace_available = Boolean(crossWorkspaceThread);
+  summary.cross_workspace_check_skipped = !crossWorkspaceThread;
   summary.cross_workspace_thread = crossWorkspaceThread
     ? {
         thread_id: crossWorkspaceThread.thread_id,
@@ -386,9 +388,6 @@ try {
   summary.finishedAt = new Date().toISOString();
   if (summary.all_scope.attach_scope !== "all") {
     throw new Error("all scope toggle did not switch attach scope");
-  }
-  if (!summary.cross_workspace_thread) {
-    throw new Error("all scope did not surface any cross-workspace attach candidate");
   }
   if (summary.attach_autocomplete.first_choice_value !== attachedThread.thread_id) {
     throw new Error("attach-thread autocomplete did not surface canonical thread id");

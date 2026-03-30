@@ -3,6 +3,7 @@ import {
   extractFinalText,
   extractTurn,
   JsonRpcWsClient,
+  listStoredThreads,
   readThreadWithTurns,
   runTurnAndRead,
 } from "./app_server_jsonrpc.mjs";
@@ -56,6 +57,25 @@ function statusType(snapshot) {
     snapshot.coordinator_status?.status ??
     "offline_or_no_lease"
   );
+}
+
+function buildCoordinatorStatusRecord(snapshot, type, threadRead = null) {
+  const threadId =
+    threadRead?.thread?.id ??
+    normalizeThreadId(snapshot) ??
+    snapshot?.coordinator_status?.threadId ??
+    null;
+  const activeFlags = Array.isArray(threadRead?.thread?.status?.activeFlags)
+    ? threadRead.thread.status.activeFlags
+    : Array.isArray(snapshot?.coordinator_status?.activeFlags)
+      ? snapshot.coordinator_status.activeFlags
+      : [];
+  return {
+    observed_at: new Date().toISOString(),
+    threadId,
+    type,
+    activeFlags,
+  };
 }
 
 function isAttachedCodexThread(snapshot) {
@@ -162,6 +182,68 @@ export class BridgeRuntime {
     return await readProjectSnapshot(this.paths);
   }
 
+  async resolveEffectiveCoordinatorStatus(snapshot = null) {
+    const baseSnapshot = snapshot ?? (await this.snapshot());
+    const mirroredStatus = statusType(baseSnapshot);
+    if (!isAttachedCodexThread(baseSnapshot)) {
+      return {
+        status: mirroredStatus,
+        snapshot: baseSnapshot,
+        synchronized: false,
+      };
+    }
+
+    const threadId = normalizeThreadId(baseSnapshot);
+    if (!threadId) {
+      return {
+        status: mirroredStatus,
+        snapshot: baseSnapshot,
+        synchronized: false,
+      };
+    }
+
+    const client = await this.connectClientIfNeeded().catch(() => null);
+    if (!client) {
+      return {
+        status: mirroredStatus,
+        snapshot: baseSnapshot,
+        synchronized: false,
+      };
+    }
+
+    const threadRead = await client.request("thread/read", {
+      threadId,
+      includeTurns: false,
+    }).catch(() => null);
+    const actualStatus = threadRead?.thread?.status?.type ?? threadRead?.thread?.status ?? null;
+    if (!actualStatus) {
+      return {
+        status: mirroredStatus,
+        snapshot: baseSnapshot,
+        synchronized: false,
+      };
+    }
+
+    if (actualStatus === mirroredStatus) {
+      return {
+        status: actualStatus,
+        snapshot: baseSnapshot,
+        synchronized: false,
+      };
+    }
+
+    const nextCoordinatorStatus = buildCoordinatorStatusRecord(baseSnapshot, actualStatus, threadRead);
+    await writeAtomicJson(path.join(this.paths.stateDir, "coordinator_status.json"), nextCoordinatorStatus);
+    return {
+      status: actualStatus,
+      snapshot: {
+        ...baseSnapshot,
+        coordinator_status: nextCoordinatorStatus,
+      },
+      synchronized: true,
+    };
+  }
+
   async statusSummary() {
     const snapshot = await this.snapshot();
     const summary = summarizeSnapshot(this.paths, snapshot);
@@ -191,9 +273,19 @@ export class BridgeRuntime {
       summary.attached_workspace_cwd = attachedCwd;
       summary.attached_workspace_label = path.basename(attachedCwd) || attachedCwd;
     }
+    if (!summary.attached_workspace_label && snapshot.project_identity?.attached_workspace_label) {
+      summary.attached_workspace_label = snapshot.project_identity.attached_workspace_label;
+    }
+    if (!summary.attached_thread_name) {
+      summary.attached_thread_name =
+        snapshot.project_identity?.attached_thread_display_name ??
+        snapshot.project_identity?.display_name ??
+        null;
+    }
 
     const client = await this.connectClientIfNeeded().catch(() => null);
     if (!client) {
+      await this.backfillAttachedProjectIdentity(snapshot, summary);
       return summary;
     }
 
@@ -201,14 +293,21 @@ export class BridgeRuntime {
       threadId: attachedThreadId,
       includeTurns: false,
     }).catch(() => null);
-    const thread = threadRead?.thread ?? null;
+    const thread = threadRead?.thread ?? (await readStoredThreadMetadata(client, attachedThreadId));
     if (!thread) {
+      await this.backfillAttachedProjectIdentity(snapshot, summary);
       return summary;
     }
 
     summary.attached_thread_status = thread.status?.type ?? thread.status ?? null;
-    summary.attached_thread_source = thread.source ?? null;
-    summary.attached_thread_name = String(thread.name ?? "").trim() || null;
+    summary.attached_thread_source =
+      thread.source ?? summary.attached_thread_source ?? snapshot.project_identity?.attached_thread_source ?? null;
+    summary.attached_thread_name =
+      String(thread.name ?? "").trim() ||
+      summary.attached_thread_name ||
+      snapshot.project_identity?.attached_thread_display_name ||
+      snapshot.project_identity?.display_name ||
+      null;
     summary.attached_thread_hint = summarizeThreadPreviewHint(thread.preview);
     summary.attached_workspace_cwd = thread.cwd ?? summary.attached_workspace_cwd ?? null;
     summary.attached_workspace_label =
@@ -228,7 +327,32 @@ export class BridgeRuntime {
       }
     }
 
+    await this.backfillAttachedProjectIdentity(snapshot, summary);
     return summary;
+  }
+
+  async backfillAttachedProjectIdentity(snapshot, summary) {
+    const identity = snapshot.project_identity ?? null;
+    if (!identity || identity.source_kind !== "codex_thread_attach") return;
+
+    const nextIdentity = { ...identity };
+    let changed = false;
+
+    if (!nextIdentity.attached_thread_display_name && summary.attached_thread_name) {
+      nextIdentity.attached_thread_display_name = summary.attached_thread_name;
+      changed = true;
+    }
+    if (!nextIdentity.attached_thread_source && summary.attached_thread_source) {
+      nextIdentity.attached_thread_source = summary.attached_thread_source;
+      changed = true;
+    }
+    if (!nextIdentity.attached_workspace_label && summary.attached_workspace_label) {
+      nextIdentity.attached_workspace_label = summary.attached_workspace_label;
+      changed = true;
+    }
+
+    if (!changed) return;
+    await writeAtomicJson(path.join(this.paths.stateDir, "project_identity.json"), nextIdentity);
   }
 
   async readInFlight() {
@@ -389,6 +513,7 @@ export class BridgeRuntime {
     }
 
     const snapshot = await this.snapshot();
+    const projectDisplayName = snapshot.project_identity?.display_name ?? null;
     if (command.command_class === "approve-candidate") {
       return await this.routeApprovalCandidate(command, snapshot);
     }
@@ -409,6 +534,7 @@ export class BridgeRuntime {
         : await this.arbitratePersistedEvent(routed.filePath, { snapshot });
     return {
       route: "inbox",
+      project_display_name: projectDisplayName,
       ...routed,
       ...delivery,
     };
@@ -556,6 +682,8 @@ export class BridgeRuntime {
   }
 
   async evaluateDeliveryGate(record, snapshot) {
+    const effectiveStatus = await this.resolveEffectiveCoordinatorStatus(snapshot);
+    snapshot = effectiveStatus.snapshot;
     const duplicate = await findProcessedCorrelation(this.paths, record.correlation_key);
     if (duplicate) {
       return {
@@ -617,7 +745,7 @@ export class BridgeRuntime {
       };
     }
 
-    const currentStatus = statusType(snapshot);
+    const currentStatus = effectiveStatus.status;
     if (["busy_non_interruptible", "active", "offline_or_no_lease"].includes(currentStatus)) {
       return {
         decision: "defer",
@@ -657,7 +785,8 @@ export class BridgeRuntime {
       throw new Error(`persisted event ${filePath} has no operator message`);
     }
 
-    const snapshot = await this.snapshot();
+    const effectiveStatus = await this.resolveEffectiveCoordinatorStatus();
+    const snapshot = effectiveStatus.snapshot;
     const threadId = normalizeThreadId(snapshot);
     if (!threadId) {
       throw new Error("persisted delivery requires coordinator binding");
@@ -674,7 +803,7 @@ export class BridgeRuntime {
     }
 
     const client = await this.connectClientIfNeeded();
-    if (canResumeAttachedThread(snapshot)) {
+    if (canResumeAttachedThread(snapshot, effectiveStatus.status)) {
       await client.request("thread/resume", {
         threadId,
         cwd: snapshot.project_identity?.cwd ?? this.paths.workspaceRoot,
@@ -854,6 +983,22 @@ function summarizeThreadPreviewHint(preview) {
 function isBootstrapNextBatch(value) {
   const text = String(value ?? "").trim().toLowerCase();
   return text === "main coordinator state refresh";
+}
+
+async function readStoredThreadMetadata(client, threadId) {
+  let cursor = null;
+  while (true) {
+    const page = await listStoredThreads(client, {
+      limit: 50,
+      archived: false,
+      cursor,
+    }).catch(() => null);
+    const rows = page?.data ?? [];
+    const found = rows.find((thread) => thread?.id === threadId) ?? null;
+    if (found) return found;
+    cursor = page?.nextCursor ?? null;
+    if (!cursor || !rows.length) return null;
+  }
 }
 
 async function writeCoordinatorStatusIfChanged(paths, nextStatus) {

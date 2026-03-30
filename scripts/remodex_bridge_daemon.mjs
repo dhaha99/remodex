@@ -29,7 +29,10 @@ const sharedBase = process.env.REMODEX_SHARED_BASE ?? path.join(workspace, "runt
 const workspaceKey = process.env.REMODEX_WORKSPACE_KEY ?? "remodex";
 const host = process.env.REMODEX_OPERATOR_HTTP_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.REMODEX_OPERATOR_HTTP_PORT ?? "8787", 10);
-const wsUrl = process.env.CODEX_APP_SERVER_WS_URL ?? process.env.REMODEX_APP_SERVER_WS_URL ?? null;
+const wsUrl =
+  process.env.CODEX_APP_SERVER_WS_URL ??
+  process.env.REMODEX_APP_SERVER_WS_URL ??
+  "ws://127.0.0.1:4517";
 const autoConsumeHumanGate = process.env.REMODEX_AUTO_CONSUME_HUMAN_GATE === "true";
 const eventsLogPath =
   process.env.REMODEX_BRIDGE_EVENTS_LOG_PATH ??

@@ -46,6 +46,7 @@ export class DiscordGatewayAdapterRuntime {
     workspaceKey,
     wsUrl = null,
     logPath = null,
+    appServerLogPath = null,
     serviceName = "remodex_discord_gateway_adapter",
     processedBy = "remodex_discord_gateway_adapter",
     workspaceCwd = process.cwd(),
@@ -54,6 +55,7 @@ export class DiscordGatewayAdapterRuntime {
     this.workspaceKey = workspaceKey;
     this.wsUrl = wsUrl;
     this.logPath = logPath;
+    this.appServerLogPath = appServerLogPath ?? logPath;
     this.serviceName = serviceName;
     this.processedBy = processedBy;
     this.workspaceCwd = workspaceCwd;
@@ -76,7 +78,7 @@ export class DiscordGatewayAdapterRuntime {
       workspaceKey: this.workspaceKey,
       projectKey: key,
       wsUrl: this.wsUrl,
-      logPath: this.logPath,
+      logPath: this.appServerLogPath,
       serviceName: this.serviceName,
       processedBy: this.processedBy,
     });
@@ -876,7 +878,11 @@ export class DiscordGatewayAdapterRuntime {
 
   async withAppServerClient(work) {
     if (!this.wsUrl) return null;
-    const client = await createInitializedWsClient(this.wsUrl, this.logPath, `${this.serviceName}_catalog`);
+    const client = await createInitializedWsClient(
+      this.wsUrl,
+      this.appServerLogPath,
+      `${this.serviceName}_catalog`,
+    );
     try {
       return await work(client);
     } finally {
@@ -942,15 +948,46 @@ export class DiscordGatewayAdapterRuntime {
       throw new Error("channel binding requires guildId and channelId");
     }
     const bindings = await this.readChannelBindings();
-    bindings[channelBindingKey(guildId, channelId)] = {
+    const key = channelBindingKey(guildId, channelId);
+    const existing = bindings[key] ?? null;
+    const preserveBridge =
+      existing && existing.project_key === projectKey
+        ? {
+            bridge_thread_id: existing.bridge_thread_id ?? null,
+            bridge_thread_created_at: existing.bridge_thread_created_at ?? null,
+            bridge_thread_last_used_at: existing.bridge_thread_last_used_at ?? null,
+            bridge_thread_status: existing.bridge_thread_status ?? null,
+          }
+        : {};
+    bindings[key] = {
       guild_id: guildId,
       channel_id: channelId,
       project_key: projectKey,
       operator_id: operatorId,
       updated_at: new Date().toISOString(),
+      ...preserveBridge,
     };
     await writeAtomicJson(this.channelBindingsPath, { bindings });
-    return bindings[channelBindingKey(guildId, channelId)];
+    return bindings[key];
+  }
+
+  async patchChannelBinding({ guildId, channelId, patch = {} }) {
+    if (!guildId || !channelId) {
+      throw new Error("channel binding requires guildId and channelId");
+    }
+    const bindings = await this.readChannelBindings();
+    const key = channelBindingKey(guildId, channelId);
+    const existing = bindings[key];
+    if (!existing) {
+      throw new Error(`channel binding not found for ${key}`);
+    }
+    bindings[key] = {
+      ...existing,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+    await writeAtomicJson(this.channelBindingsPath, { bindings });
+    return bindings[key];
   }
 
   async resolveProjectReference(normalized) {
@@ -1225,6 +1262,9 @@ export class DiscordGatewayAdapterRuntime {
       aliases: buildAttachedThreadAliases(projectKey, displayName, thread),
       source_kind: "codex_thread_attach",
       attached_thread_id: thread.id,
+      attached_thread_display_name: displayName,
+      attached_thread_source: thread.source ?? null,
+      attached_workspace_label: summarizeThreadWorkspace(thread, this.workspaceCwd),
       cwd: thread.cwd ?? null,
       created_at: new Date().toISOString(),
       created_by: operatorId,

@@ -14,7 +14,15 @@ fi
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
 : "${REMODEX_SHARED_BASE:=$REMODEX_WORKSPACE/runtime/external-shared-memory}"
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 : "${REMODEX_DISCORD_LIVE_PROOF_DIR:=$REMODEX_WORKSPACE/runtime/live-discord-proof}"
 : "${REMODEX_DISCORD_LIVE_PROOF_REGISTER_COMMANDS:=true}"
 : "${REMODEX_DISCORD_LIVE_PROOF_EXPECT_INTERACTION:=false}"

@@ -14,10 +14,19 @@ fi
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
 : "${REMODEX_SHARED_BASE:=$REMODEX_WORKSPACE/runtime/external-shared-memory}"
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 : "${REMODEX_DISCORD_GATEWAY_URL:=wss://gateway.discord.gg/?v=10&encoding=json}"
-: "${REMODEX_DISCORD_GATEWAY_INTENTS:=0}"
+: "${REMODEX_DISCORD_GATEWAY_INTENTS:=33281}"
 : "${REMODEX_DISCORD_API_BASE_URL:=https://discord.com/api/v10}"
+: "${REMODEX_DISCORD_OUTBOX_POLL_INTERVAL_MS:=2000}"
 
 if [[ -z "${REMODEX_DISCORD_BOT_TOKEN:-}" && -z "${REMODEX_DISCORD_BOT_TOKEN_PATH:-}" ]]; then
   echo "REMODEX_DISCORD_BOT_TOKEN or REMODEX_DISCORD_BOT_TOKEN_PATH is required" >&2
@@ -31,6 +40,7 @@ export REMODEX_NODE_BIN
 export REMODEX_DISCORD_GATEWAY_URL
 export REMODEX_DISCORD_GATEWAY_INTENTS
 export REMODEX_DISCORD_API_BASE_URL
+export REMODEX_DISCORD_OUTBOX_POLL_INTERVAL_MS
 export REMODEX_DISCORD_BOT_TOKEN
 export REMODEX_DISCORD_BOT_TOKEN_PATH
 

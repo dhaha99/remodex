@@ -98,8 +98,9 @@ Fallback only:
 - `REMODEX_WINDOWS_TASK_PREFIX=Remodex`
 - `REMODEX_AUTO_CONSUME_HUMAN_GATE=false`
 - `REMODEX_DISCORD_GATEWAY_URL=wss://gateway.discord.gg/?v=10&encoding=json`
-- `REMODEX_DISCORD_GATEWAY_INTENTS=0`
+- `REMODEX_DISCORD_GATEWAY_INTENTS=33281`
 - `REMODEX_DISCORD_API_BASE_URL=https://discord.com/api/v10`
+- `REMODEX_DISCORD_OUTBOX_POLL_INTERVAL_MS=2000`
 - `REMODEX_DISCORD_GUILD_ID=<test guild id>`
 - `REMODEX_ENABLE_DISCORD_GATEWAY_ADAPTER=false`
 - `REMODEX_ENABLE_DASHBOARD_SERVER=false`
@@ -121,4 +122,6 @@ Fallback only:
 - foreground에서 작업 중인데 background toggle을 끄지 않으면 경쟁 조건이 생길 수 있다.
 - `human_gate_candidates`가 남아 있으면 background가 아니라 foreground에서 먼저 닫아야 한다.
 - `inflight_delivery.json`이 있는데 새 turn을 열면 duplicate replay 또는 duplicate receipt가 난다.
+- Discord conversation surface를 쓰려면 Discord 앱에서 Message Content intent가 켜져 있어야 한다.
+- Message Content intent가 꺼져 있어도 adapter는 `mention_only` fallback으로 살아 있어야 하며, 이 상태는 `router/discord_gateway_adapter_state.json`의 `conversation_mode`, `conversation_blocker`, `bot_username`으로 확인하는 편이 맞다.
 - macOS soak metrics에서 `ps` 수집은 현재 샌드박스 제약을 받을 수 있으므로, unattended 운영 전 최종 측정은 실제 호스트 권한으로 다시 확인해야 한다.

@@ -6,7 +6,11 @@ function sleep(ms) {
 
 function isTransientThreadReadError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("includeTurns is unavailable before first user message");
+  return (
+    message.includes("includeTurns is unavailable before first user message") ||
+    message.includes("empty session file") ||
+    message.includes("failed to load rollout")
+  );
 }
 
 export function isRetryableTurnStartError(error) {
@@ -260,11 +264,29 @@ export function extractTurn(threadReadResult, turnId) {
   return turns.find((item) => item.id === turnId) ?? null;
 }
 
-export async function readThreadWithTurns(client, threadId) {
-  return await client.request("thread/read", {
-    threadId,
-    includeTurns: true,
-  });
+export async function readThreadWithTurns(client, threadId, options = {}) {
+  const {
+    maxAttempts = 5,
+    retryBaseDelayMs = 150,
+    retryMaxDelayMs = 1_000,
+  } = options;
+  let attempts = 0;
+  while (attempts < maxAttempts) {
+    attempts += 1;
+    try {
+      return await client.request("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+    } catch (error) {
+      if (!isTransientThreadReadError(error) || attempts >= maxAttempts) {
+        throw error;
+      }
+      const delayMs = Math.min(retryMaxDelayMs, retryBaseDelayMs * (2 ** (attempts - 1)));
+      await sleep(delayMs);
+    }
+  }
+  throw new Error(`thread read retries exhausted for ${threadId}`);
 }
 
 export async function readTurnCount(client, threadId) {

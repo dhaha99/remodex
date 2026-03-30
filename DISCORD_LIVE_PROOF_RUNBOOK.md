@@ -22,6 +22,7 @@
 - 가능하면 `REMODEX_DISCORD_GUILD_ID`
 - `CODEX_APP_SERVER_WS_URL`
 - loopback bridge/dashboard host 유지
+- Discord 앱에서 Message Content intent 활성화
 
 권장:
 
@@ -41,7 +42,8 @@
    - 또는 `/status project:<project-key>`
    - 채널 기본 프로젝트를 이미 `/use-project`로 바인딩했다면 `/status`만 실행해도 된다.
    - 반드시 **guild 채널에서 app slash command UI로 실행**한다.
-   - DM 창이나 일반 텍스트 메시지 `/status project:...`는 proof interaction으로 잡히지 않는다.
+- DM 창이나 일반 텍스트 메시지 `/status project:...`는 proof interaction으로 잡히지 않는다.
+  - plain text conversation surface를 별도로 검증하려면 guild 채널에서 봇이 바인딩된 상태로 일반 텍스트를 보내야 한다.
 5. wrapper는 runner 뒤에 finalizer를 자동으로 실행한다.
 6. run이 끝나면 아래 두 파일을 같이 확인한다.
    - `runtime/live-discord-proof/live-proof-bundle.json`

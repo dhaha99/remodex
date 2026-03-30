@@ -13,7 +13,10 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const workspace = process.env.REMODEX_WORKSPACE ?? path.resolve(scriptDir, "..");
 const sharedBase = process.env.REMODEX_SHARED_BASE ?? path.join(workspace, "runtime", "external-shared-memory");
 const workspaceKey = process.env.REMODEX_WORKSPACE_KEY ?? "remodex";
-const wsUrl = process.env.CODEX_APP_SERVER_WS_URL ?? process.env.REMODEX_APP_SERVER_WS_URL ?? null;
+const wsUrl =
+  process.env.CODEX_APP_SERVER_WS_URL ??
+  process.env.REMODEX_APP_SERVER_WS_URL ??
+  "ws://127.0.0.1:4517";
 const onlyProjectKey = process.env.REMODEX_PROJECT_KEY ?? null;
 const eventsLogPath =
   process.env.REMODEX_SCHEDULER_EVENTS_LOG_PATH ??
@@ -49,6 +52,20 @@ function blockedDecision(projectKey, reasons, snapshot) {
   };
 }
 
+function classifySchedulerError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("websocket connect failed")) {
+    return {
+      reason: "app_server_unreachable",
+      error_message: message,
+    };
+  }
+  return {
+    reason: "scheduler_runtime_error",
+    error_message: message,
+  };
+}
+
 async function processProject(projectKey) {
   const runtime = await BridgeRuntime.forProject({
     sharedBase,
@@ -61,8 +78,10 @@ async function processProject(projectKey) {
   });
 
   try {
-    const snapshot = await runtime.snapshot();
-    const status = currentStatus(snapshot);
+    let snapshot = await runtime.snapshot();
+    const effectiveStatus = await runtime.resolveEffectiveCoordinatorStatus(snapshot);
+    snapshot = effectiveStatus.snapshot;
+    const status = effectiveStatus.status;
     const toggle = snapshot.background_trigger_toggle ?? {};
     const reasons = [];
 
@@ -86,35 +105,48 @@ async function processProject(projectKey) {
     }
 
     let result;
-    if (reasons.length > 0) {
-      result = blockedDecision(projectKey, reasons, snapshot);
-    } else if ((snapshot.counts?.dispatch_queue ?? 0) > 0) {
+    try {
+      if (reasons.length > 0) {
+        result = blockedDecision(projectKey, reasons, snapshot);
+      } else if ((snapshot.counts?.dispatch_queue ?? 0) > 0) {
+        result = {
+          project_key: projectKey,
+          decision: "dispatch_queue",
+          recorded_at: new Date().toISOString(),
+          result: await runtime.deliverNextDispatch(),
+        };
+      } else if ((snapshot.counts?.inbox ?? 0) > 0) {
+        result = {
+          project_key: projectKey,
+          decision: "inbox",
+          recorded_at: new Date().toISOString(),
+          result: await runtime.deliverNextInbox(),
+        };
+      } else if (attachedExistingThreadNeedsWake(snapshot, status)) {
+        result = {
+          project_key: projectKey,
+          decision: "attached_thread_wake",
+          recorded_at: new Date().toISOString(),
+          result: await runtime.wakeAttachedCoordinator(),
+        };
+      } else {
+        result = {
+          project_key: projectKey,
+          decision: "noop",
+          reasons: ["no_pending_work"],
+          summary: summarizeSnapshot(runtime.paths, snapshot),
+          recorded_at: new Date().toISOString(),
+        };
+      }
+    } catch (error) {
+      const classified = classifySchedulerError(error);
+      const freshSnapshot = await runtime.snapshot().catch(() => snapshot);
       result = {
         project_key: projectKey,
-        decision: "dispatch_queue",
-        recorded_at: new Date().toISOString(),
-        result: await runtime.deliverNextDispatch(),
-      };
-    } else if ((snapshot.counts?.inbox ?? 0) > 0) {
-      result = {
-        project_key: projectKey,
-        decision: "inbox",
-        recorded_at: new Date().toISOString(),
-        result: await runtime.deliverNextInbox(),
-      };
-    } else if (attachedExistingThreadNeedsWake(snapshot, status)) {
-      result = {
-        project_key: projectKey,
-        decision: "attached_thread_wake",
-        recorded_at: new Date().toISOString(),
-        result: await runtime.wakeAttachedCoordinator(),
-      };
-    } else {
-      result = {
-        project_key: projectKey,
-        decision: "noop",
-        reasons: ["no_pending_work"],
-        summary: summarizeSnapshot(runtime.paths, snapshot),
+        decision: "blocked",
+        reasons: [classified.reason],
+        error_message: classified.error_message,
+        summary: summarizeSnapshot(runtime.paths, freshSnapshot),
         recorded_at: new Date().toISOString(),
       };
     }
@@ -128,17 +160,24 @@ async function processProject(projectKey) {
   }
 }
 
-const projectKeys = onlyProjectKey
-  ? [onlyProjectKey]
-  : await listProjectKeys(sharedBase, workspaceKey);
+async function main() {
+  const projectKeys = onlyProjectKey
+    ? [onlyProjectKey]
+    : await listProjectKeys(sharedBase, workspaceKey);
 
-const results = [];
-for (const projectKey of projectKeys) {
-  results.push(await processProject(projectKey));
+  const results = [];
+  for (const projectKey of projectKeys) {
+    results.push(await processProject(projectKey));
+  }
+
+  console.log(JSON.stringify({
+    workspace_key: workspaceKey,
+    project_count: results.length,
+    results,
+  }, null, 2));
 }
 
-console.log(JSON.stringify({
-  workspace_key: workspaceKey,
-  project_count: results.length,
-  results,
-}, null, 2));
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+});

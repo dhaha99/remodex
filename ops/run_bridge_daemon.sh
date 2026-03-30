@@ -17,7 +17,15 @@ fi
 : "${REMODEX_OPERATOR_HTTP_HOST:=127.0.0.1}"
 : "${REMODEX_OPERATOR_HTTP_PORT:=8787}"
 : "${REMODEX_AUTO_CONSUME_HUMAN_GATE:=false}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 
 export REMODEX_WORKSPACE
 export REMODEX_SHARED_BASE

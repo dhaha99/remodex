@@ -14,7 +14,15 @@ fi
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
 : "${REMODEX_SHARED_BASE:=/tmp/remodex-churn-shared}"
 : "${REMODEX_WORKSPACE_KEY:=remodex}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 : "${REMODEX_METRICS_DIR:=/tmp/remodex-churn-metrics}"
 : "${REMODEX_CHURN_STACK_DIR:=/tmp/remodex-churn-runtime}"
 : "${REMODEX_CHURN_DURATION_SECONDS:=600}"

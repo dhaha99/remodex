@@ -13,7 +13,15 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 : "${REMODEX_WORKSPACE:=$WORKSPACE_DIR}"
-: "${REMODEX_NODE_BIN:=node}"
+if [[ -z "${REMODEX_NODE_BIN:-}" ]]; then
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    REMODEX_NODE_BIN="/opt/homebrew/bin/node"
+  elif [[ -x "/usr/local/bin/node" ]]; then
+    REMODEX_NODE_BIN="/usr/local/bin/node"
+  else
+    REMODEX_NODE_BIN="node"
+  fi
+fi
 : "${REMODEX_SCHEDULER_KIND:=launchd_launchagent}"
 
 export REMODEX_WORKSPACE

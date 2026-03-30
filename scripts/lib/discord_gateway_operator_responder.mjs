@@ -1,4 +1,19 @@
-function summarizeStatus(summary) {
+function renderConversationModeNote(conversationState = null) {
+  if (!conversationState || conversationState.mode !== "mention_only") {
+    return null;
+  }
+  const botName = conversationState.botUsername ?? "Remodex Pilot";
+  return `대화 모드: mention_only. 평문 대화는 \`@${botName} 지금 어디까지 했어?\`처럼 멘션을 포함해야 합니다.`;
+}
+
+function pushConversationModeNote(lines, conversationState = null) {
+  const note = renderConversationModeNote(conversationState);
+  if (note) {
+    lines.push(note);
+  }
+}
+
+function summarizeStatus(summary, conversationState = null) {
   const lines = [];
   if (summary.project_display_name) {
     lines.push(`display: ${summary.project_display_name}`);
@@ -18,6 +33,7 @@ function summarizeStatus(summary) {
   lines.push(`next: ${summary.next_smallest_batch ?? "none"}`);
   lines.push(`human_gate: ${summary.human_gate_candidate_count ?? 0}`);
   lines.push(`queue: ${summary.dispatch_queue_count ?? 0}`);
+  pushConversationModeNote(lines, conversationState);
   return lines.join("\n");
 }
 
@@ -42,13 +58,15 @@ function renderStatusLabel(status) {
   return value;
 }
 
-function summarizeProjects(projects, attachableThreads = [], attachScope = "recommended") {
+function summarizeProjects(projects, attachableThreads = [], attachScope = "recommended", conversationState = null) {
   if (!projects?.length && !attachableThreads?.length) {
-    return [
+    const lines = [
       "projects: none",
       "next: shared memory에 등록된 프로젝트가 없습니다.",
       "tip: 기존 thread는 직접 연결하거나, 새 프로젝트를 등록할 수 있습니다.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
 
   const lines = [];
@@ -84,6 +102,7 @@ function summarizeProjects(projects, attachableThreads = [], attachScope = "reco
   }
 
   lines.push("tip: 추천 후보만 보거나, 다른 저장소를 포함한 전체 후보를 보거나, thread id로 직접 연결할 수 있습니다.");
+  pushConversationModeNote(lines, conversationState);
   return lines.join("\n");
 }
 
@@ -321,11 +340,13 @@ function renderAttachThreadModal() {
   };
 }
 
-function summarizeSelectedProject(project) {
+function summarizeSelectedProject(project, conversationState = null) {
   if (!project) {
-    return "project: unknown\nhint: 선택한 프로젝트 정보를 찾지 못했습니다.";
+    const lines = ["project: unknown", "hint: 선택한 프로젝트 정보를 찾지 못했습니다."];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
-  return [
+  const lines = [
     `project: ${project.project_key}`,
     `display: ${project.display_name ?? project.project_key}`,
     `mode: ${project.mode ?? "manual"}`,
@@ -333,17 +354,21 @@ function summarizeSelectedProject(project) {
     `focus: ${project.current_focus ?? "none"}`,
     `next: ${project.next_smallest_batch ?? "none"}`,
     "tip: 버튼으로 상태 조회, 채널 고정, 작업 지시, background 시작, 앱 복귀를 이어갈 수 있습니다.",
-  ].join("\n");
+  ];
+  pushConversationModeNote(lines, conversationState);
+  return lines.join("\n");
 }
 
-function summarizeModeUpdate(result) {
+function summarizeModeUpdate(result, conversationState = null) {
   if (result.route === "project_mode_invalid") {
-    return [
+    const lines = [
       "route: project_mode_invalid",
       `project: ${result.project_key ?? "unknown"}`,
       `reason: ${result.reason ?? "invalid_mode_target"}`,
       "tip: background 시작 또는 앱 복귀 중 하나로 다시 시도하세요.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
 
   const lines = ["route: project_mode_updated"];
@@ -354,10 +379,25 @@ function summarizeModeUpdate(result) {
   lines.push(`mode: ${result.mode_target ?? "unknown"}`);
   if (result.mode_target === "background") {
     lines.push(`scheduler: ${result.scheduler_gate?.ready ? "armed" : "blocked"}`);
+    if (result.summary?.coordinator_status) {
+      lines.push(`status: ${renderStatusLabel(result.summary.coordinator_status)}`);
+    }
+    if (typeof result.summary?.inbox_count === "number") {
+      lines.push(`inbox: ${result.summary.inbox_count}`);
+    }
+    if (typeof result.summary?.dispatch_queue_count === "number") {
+      lines.push(`queue: ${result.summary.dispatch_queue_count}`);
+    }
     if (result.scheduler_gate?.reasons?.length) {
       lines.push(`blocked_reasons: ${result.scheduler_gate.reasons.join(", ")}`);
     }
-    if (result.wake_strategy === "resume_attached_thread") {
+    if (
+      result.scheduler_gate?.ready &&
+      (result.summary?.inbox_count ?? 0) === 0 &&
+      (result.summary?.dispatch_queue_count ?? 0) === 0
+    ) {
+      lines.push("tip: background는 켜졌고, 지금은 대기 요청이 없어 바로 처리할 일만 없습니다.");
+    } else if (result.wake_strategy === "resume_attached_thread") {
       lines.push("tip: 다음 scheduler tick에서 기존 Codex 스레드를 다시 로드하고, 이후 inbox/dispatch 작업을 이어서 받을 수 있게 합니다.");
     } else {
       lines.push("tip: approval 대기나 must_human_check가 있으면 background는 계속 차단됩니다.");
@@ -366,10 +406,11 @@ function summarizeModeUpdate(result) {
     lines.push("scheduler: blocked_expected");
     lines.push("tip: 이제 이 채널의 작업은 foreground 메인 기준으로 이어집니다.");
   }
+  pushConversationModeNote(lines, conversationState);
   return lines.join("\n");
 }
 
-function summarizeProjectResolutionHelp(result) {
+function summarizeProjectResolutionHelp(result, conversationState = null) {
   const projects = result.available_projects ?? [];
   const lines = [];
   if (result.route === "unknown_project") {
@@ -389,58 +430,75 @@ function summarizeProjectResolutionHelp(result) {
     lines.push("available: none");
   }
   lines.push("tip: /projects 또는 project 자동완성을 사용하세요.");
+  pushConversationModeNote(lines, conversationState);
   return lines.join("\n");
 }
 
-function summarizeCreateProjectResult(result) {
+function summarizeCreateProjectResult(result, conversationState = null) {
   if (result.route === "project_created") {
-    return [
+    const lines = [
       "route: project_created",
       `project: ${result.project_key}`,
       `display: ${result.display_name ?? result.project?.display_name ?? result.project_key}`,
       `goal: ${result.project?.current_goal ?? "none"}`,
       `channel_bound: ${result.auto_bound_channel ? "yes" : "no"}`,
       "tip: 이제 /status 또는 상태 보기 버튼으로 바로 확인할 수 있습니다.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
   if (result.route === "create_project_conflict") {
-    return [
+    const lines = [
       "route: create_project_conflict",
       `project: ${result.project_key ?? "unknown"}`,
       "reason: 같은 project_key 가 이미 등록돼 있습니다.",
       "tip: 다른 키를 쓰거나 /projects 에서 기존 프로젝트를 선택하세요.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
-  return [
+  const lines = [
     "route: create_project_invalid",
     `reason: ${result.reason ?? "invalid_request"}`,
     "tip: 표시 이름을 넣고, project key 는 비워두거나 영문 키를 지정하세요.",
-  ].join("\n");
+  ];
+  pushConversationModeNote(lines, conversationState);
+  return lines.join("\n");
 }
 
-function summarizeThreadAttachResult(result) {
+function summarizeThreadAttachResult(result, conversationState = null) {
   if (result.route === "thread_attached" || result.route === "thread_attached_existing") {
-    return [
+    const lines = [
       `route: ${result.route}`,
       ...(result.project?.display_name ? [`display: ${result.project.display_name}`] : []),
       `project: ${result.project_key ?? "unknown"}`,
       `thread: ${String(result.thread_id ?? "").slice(0, 8) || "unknown"}`,
       `channel_bound: ${result.auto_bound_channel ? "yes" : "no"}`,
       "tip: 이제 이 채널에서 /status, 상태 보기, 작업 지시를 바로 사용할 수 있습니다.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
-  return [
+  const lines = [
     "route: thread_attach_invalid",
     `reason: ${result.reason ?? "invalid_request"}`,
     "tip: /projects 의 전체 보기나 /attach-thread thread_id:<...> 로 다시 시도하세요.",
-  ].join("\n");
+  ];
+  pushConversationModeNote(lines, conversationState);
+  return lines.join("\n");
 }
 
-function summarizeIngress(normalized, result) {
+function summarizeIngress(normalized, result, conversationState = null) {
   const resolvedProjectKey = result.project_key ?? normalized.project_key ?? "_unresolved";
+  const displayName = result.project_display_name ?? result.project?.display_name ?? null;
 
   if (result.route === "projects") {
-    return summarizeProjects(result.projects, result.attachable_threads ?? [], result.attach_scope ?? "recommended");
+    return summarizeProjects(
+      result.projects,
+      result.attachable_threads ?? [],
+      result.attach_scope ?? "recommended",
+      conversationState,
+    );
   }
 
   if (
@@ -448,7 +506,7 @@ function summarizeIngress(normalized, result) {
     result.route === "create_project_conflict" ||
     result.route === "create_project_invalid"
   ) {
-    return summarizeCreateProjectResult(result);
+    return summarizeCreateProjectResult(result, conversationState);
   }
 
   if (
@@ -456,66 +514,78 @@ function summarizeIngress(normalized, result) {
     result.route === "thread_attached_existing" ||
     result.route === "thread_attach_invalid"
   ) {
-    return summarizeThreadAttachResult(result);
+    return summarizeThreadAttachResult(result, conversationState);
   }
 
   if (result.route === "project_mode_updated" || result.route === "project_mode_invalid") {
-    return summarizeModeUpdate(result);
+    return summarizeModeUpdate(result, conversationState);
   }
 
   if (result.route === "channel_binding") {
-    return [
+    const lines = [
       "route: channel_binding",
-      ...(result.project?.display_name ? [`display: ${result.project.display_name}`] : []),
+      ...(displayName ? [`display: ${displayName}`] : []),
       `project: ${resolvedProjectKey}`,
       `resolved_via: ${result.resolved_via ?? "explicit"}`,
       "tip: 이제 같은 채널에서는 /status, /intent 에서 project를 생략할 수 있습니다.",
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
 
   if (result.route === "project_required" || result.route === "unknown_project") {
-    return summarizeProjectResolutionHelp(result);
+    return summarizeProjectResolutionHelp(result, conversationState);
   }
 
   if (result.route === "quarantine") {
-    return [
+    const lines = [
       `route: quarantine`,
+      ...(displayName ? [`display: ${displayName}`] : []),
       `project: ${resolvedProjectKey}`,
       `reason: ${result.quarantine_reason ?? "unknown"}`,
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
 
   if (result.route === "human_gate_candidate") {
-    return [
+    const lines = [
       `route: human_gate_candidate`,
+      ...(displayName ? [`display: ${displayName}`] : []),
       `project: ${resolvedProjectKey}`,
       `source_ref: ${normalized.source_ref}`,
       `state: await_human_gate`,
-    ].join("\n");
+    ];
+    pushConversationModeNote(lines, conversationState);
+    return lines.join("\n");
   }
 
-  return [
+  const lines = [
     `route: ${result.route}`,
+    ...(displayName ? [`display: ${displayName}`] : []),
     `project: ${resolvedProjectKey}`,
     `delivery: ${result.delivery_decision ?? "unknown"}`,
     `source_ref: ${normalized.source_ref}`,
-  ].join("\n");
+  ];
+  pushConversationModeNote(lines, conversationState);
+  return lines.join("\n");
 }
 
-export function renderGatewayOperatorMessage({ normalized, result }) {
+export function renderGatewayOperatorMessage({ normalized, result, conversationState = null }) {
   if (result.route === "project_selected") {
-    return summarizeSelectedProject(result.project);
+    return summarizeSelectedProject(result.project, conversationState);
   }
   if (normalized.command_class === "status" && result.route === "status") {
-    return summarizeStatus(result.summary);
+    return summarizeStatus(result.summary, conversationState);
   }
-  return summarizeIngress(normalized, result);
+  return summarizeIngress(normalized, result, conversationState);
 }
 
 export async function processGatewayInteraction({
   interaction,
   runtime,
   callbackTransport,
+  conversationState = null,
 }) {
   if (interaction.type === 4) {
     const outcome = await runtime.handleInteractionPayload(interaction);
@@ -533,7 +603,7 @@ export async function processGatewayInteraction({
       await callbackTransport.deferUpdateMessage(interaction);
     }
     const outcome = await runtime.handleInteractionPayload(interaction);
-    const messageBody = buildComponentMessageBody(outcome);
+    const messageBody = buildComponentMessageBody(outcome, conversationState);
     if (outcome.response_plan?.initial_response === "modal") {
       await callbackTransport.openModal(interaction, messageBody);
     } else if (shouldDeferUpdate) {
@@ -550,8 +620,11 @@ export async function processGatewayInteraction({
 
   await callbackTransport.deferChannelMessage(interaction, { ephemeral: true });
   const outcome = await runtime.handleInteractionPayload(interaction);
-  const content = renderGatewayOperatorMessage(outcome);
-  await callbackTransport.editOriginalResponse(interaction, buildDeferredMessageBody(outcome, content));
+  const content = renderGatewayOperatorMessage({ ...outcome, conversationState });
+  await callbackTransport.editOriginalResponse(
+    interaction,
+    buildDeferredMessageBody(outcome, content, conversationState),
+  );
   return {
     ...outcome,
     operator_message: content,
@@ -568,7 +641,7 @@ function shouldDeferComponentInteraction(interaction) {
   return true;
 }
 
-function buildDeferredMessageBody(outcome, content) {
+function buildDeferredMessageBody(outcome, content, conversationState = null) {
   const messageBody = {
     content,
     allowed_mentions: { parse: [] },
@@ -599,7 +672,7 @@ function buildDeferredMessageBody(outcome, content) {
   return messageBody;
 }
 
-function buildComponentMessageBody(outcome) {
+function buildComponentMessageBody(outcome, conversationState = null) {
   if (outcome.response_plan?.initial_response === "modal") {
     if (outcome.result.route === "create_project_modal") {
       return renderCreateProjectModal();
@@ -610,7 +683,7 @@ function buildComponentMessageBody(outcome) {
     return renderIntentModal(outcome.result.project_key ?? outcome.normalized.project_key);
   }
 
-  const content = renderGatewayOperatorMessage(outcome);
+  const content = renderGatewayOperatorMessage({ ...outcome, conversationState });
   const messageBody = {
     content,
     allowed_mentions: { parse: [] },
